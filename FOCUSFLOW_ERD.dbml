@@ -1,0 +1,166 @@
+// Focus Flow - Entity Relationship Diagram
+// Copy this script into dbdiagram.io to visualize the database structure
+
+Project FocusFlow {
+  database_type: 'PostgreSQL'
+  Note: 'AI-enhanced student planner for task management, focus sessions, and progress tracking'
+}
+
+// Core Task Management
+Table Task {
+  id varchar [primary key]
+  title varchar [not null]
+  description text
+  dueDate timestamp [not null]
+  priority varchar [not null, note: 'low | medium | high']
+  subject varchar
+  completed boolean [default: false]
+  completedAt timestamp
+  createdAt timestamp [not null]
+  estimatedTotalMinutes integer
+  Note: 'Main task entity with due dates and priorities'
+}
+
+Table MicroTask {
+  id varchar [primary key]
+  title varchar [not null]
+  description text
+  estimatedMinutes integer [not null]
+  completed boolean [default: false]
+  parentTaskId varchar [not null]
+  order integer [not null]
+  scheduledDate timestamp
+  scheduledStart timestamp
+  scheduledEnd timestamp
+  completedAt timestamp
+  Note: 'Sub-tasks or steps within a main task, can be scheduled with specific times'
+}
+
+// Focus Sessions
+Table PomodoroSession {
+  id varchar [primary key]
+  taskId varchar
+  microTaskId varchar
+  duration integer [not null, note: 'in minutes']
+  startTime timestamp [not null]
+  endTime timestamp
+  completed boolean [default: false]
+  type varchar [not null, note: 'focus | break']
+  Note: 'Pomodoro-style focus sessions linked to tasks or micro-tasks'
+}
+
+// Progress & Motivation
+Table ProgressStats {
+  tasksCompleted integer [default: 0]
+  microTasksCompleted integer [default: 0]
+  totalFocusMinutes integer [default: 0]
+  currentStreak integer [default: 0]
+  weeklyGoal integer [default: 20, note: 'in hours']
+  weeklyCompleted decimal [default: 0]
+  focusCoins integer [default: 0]
+  focusCoinsToday integer [default: 0]
+  level integer [default: 1]
+  Note: 'Aggregated statistics computed from tasks and sessions'
+}
+
+Table MotivationalMessage {
+  id varchar [primary key]
+  message text [not null]
+  type varchar [not null, note: 'encouragement | progress | reminder']
+  timestamp timestamp [not null]
+  Note: 'System-generated motivational messages for user engagement'
+}
+
+Table MoodEntry {
+  id varchar [primary key]
+  timestamp timestamp [not null]
+  mood varchar [not null, note: 'great | good | okay | tired | stressed']
+  note text
+  pomodoroSessionId varchar
+  Note: 'User mood tracking after focus sessions'
+}
+
+// Habits & Growth
+Table Habit {
+  id varchar [primary key]
+  name varchar [not null]
+  description text
+  streak integer [default: 0]
+  lastCompleted timestamp
+  color varchar [not null]
+  Note: 'Daily habits tracked by the user'
+}
+
+Table GrowthPlant {
+  id varchar [primary key]
+  type varchar [not null, note: 'seed | sprout | sapling | tree | flower']
+  focusMinutes integer [not null, note: 'Total minutes needed to grow']
+  currentMinutes integer [default: 0]
+  plantedDate timestamp [not null]
+  color varchar [not null]
+  Note: 'Visual growth representation based on focus time'
+}
+
+// Calendar Integration
+Table CalendarIntegration {
+  type varchar [not null, note: 'google | outlook | lms | none']
+  connected boolean [default: false]
+  syncEnabled boolean [default: false]
+  lastSync timestamp
+  Note: 'Single record for calendar integration settings'
+}
+
+Table CalendarEvent {
+  id varchar [primary key]
+  title varchar [not null]
+  description text
+  start timestamp [not null]
+  end timestamp [not null]
+  allDay boolean [default: false]
+  eventType varchar [not null, note: 'class | task | event | meeting | study | other']
+  color varchar [not null]
+  location varchar
+  createdAt timestamp [not null]
+  updatedAt timestamp [not null]
+  Note: 'Calendar events from integrated calendars or manually added'
+}
+
+Table CalendarEventRepeat {
+  id varchar [primary key]
+  calendarEventId varchar [not null]
+  frequency varchar [not null, note: 'daily | weekly | monthly | yearly | custom']
+  interval integer [default: 1, note: 'e.g., every 2 weeks']
+  endDate timestamp
+  daysOfWeek text [note: 'Array of integers 0-6 for weekly repeats, stored as JSON or comma-separated']
+  Note: 'Recurrence rules for calendar events'
+}
+
+// Settings & Preferences
+Table SchedulePreferences {
+  workStart varchar [not null, note: '24h format, e.g., "16:00"']
+  workEnd varchar [not null, note: '24h format, e.g., "20:30"']
+  defaultSessionMinutes integer [default: 30]
+  breakMinutes integer [default: 10]
+  bufferMinutes integer [default: 5, note: 'between sessions']
+  Note: 'Single record for scheduling preferences'
+}
+
+Table MotivationPreferences {
+  personalGoal text
+  Note: 'Single record for user motivation preferences'
+}
+
+Table DistractionBlockSettings {
+  enabled boolean [default: false]
+  blockedSites text [note: 'Array of site URLs, stored as JSON or comma-separated']
+  blockDuringFocus boolean [default: true]
+  allowBreakAccess boolean [default: true]
+  Note: 'Single record for distraction blocker settings'
+}
+
+// Relationships
+Ref: MicroTask.parentTaskId > Task.id [delete: cascade]
+Ref: PomodoroSession.taskId > Task.id [delete: set null]
+Ref: PomodoroSession.microTaskId > MicroTask.id [delete: set null]
+Ref: MoodEntry.pomodoroSessionId > PomodoroSession.id [delete: set null]
+Ref: CalendarEventRepeat.calendarEventId > CalendarEvent.id [delete: cascade]

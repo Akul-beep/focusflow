@@ -1,26 +1,132 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Claude AI Color Palette */
+  --claude-dark: #141413;
+  --claude-light: #FAF9F5;
+  --claude-mid-gray: #B0AEA5;
+  --claude-light-gray: #E8E6DC;
+  --claude-orange: #D97757;
+  --claude-blue: #6A9BCC;
+  --claude-green: #788C5D;
+  
+  --background: var(--claude-light);
+  --foreground: var(--claude-dark);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-poppins);
+  --font-body: var(--font-lora);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  scroll-behavior: smooth;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-lora), Georgia, serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-poppins), Arial, sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+/* Smooth transitions */
+button, a {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #FAF9F5;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #E8E6DC;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #B0AEA5;
+}
+
+/* Focus styles */
+:focus-visible {
+  outline: 2px solid #D97757;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Enhanced card shadows for depth */
+.card-shadow {
+  box-shadow: 0 1px 3px rgba(20, 20, 19, 0.05), 0 1px 2px rgba(20, 20, 19, 0.1);
+}
+
+.card-shadow-hover {
+  box-shadow: 0 4px 6px rgba(20, 20, 19, 0.05), 0 2px 4px rgba(20, 20, 19, 0.1);
+}
+
+/* Professional gradients for subtle accents */
+.gradient-accent {
+  background: linear-gradient(135deg, rgba(106, 155, 204, 0.1) 0%, rgba(120, 140, 93, 0.1) 100%);
+}
+
+/* Improved text rendering */
+.text-enhanced {
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Smooth animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+/* FullCalendar: force Claude-style controls (prevents default blue theme) */
+.fc .fc-button-primary {
+  background: #ffffff !important;
+  color: var(--claude-dark) !important;
+  border: 1px solid var(--claude-light-gray) !important;
+  box-shadow: none !important;
+  text-transform: none !important;
+}
+.fc .fc-button-primary:hover {
+  background: var(--claude-light) !important;
+}
+.fc .fc-button-primary:focus {
+  box-shadow: none !important;
+}
+.fc .fc-button-primary:not(:disabled).fc-button-active,
+.fc .fc-button-primary:not(:disabled):active {
+  background: var(--claude-orange) !important;
+  border-color: var(--claude-orange) !important;
+  color: #ffffff !important;
+}
+.fc .fc-button-primary:disabled {
+  opacity: 0.5 !important;
 }
