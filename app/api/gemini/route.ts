@@ -90,7 +90,7 @@ function nextOccurrenceForWeeklyRepeat(args: {
 }
 
 const API_KEY = process.env.GEMINI_API_KEY || '';
-const MODEL_NAME = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const MODEL_NAME = 'gemini-2.5-flash';
 
 const isValidApiKey = API_KEY && 
   API_KEY.trim() !== '' && 
