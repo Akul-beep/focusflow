@@ -47,7 +47,7 @@ function inferDueDateFromText(text: string, today: Date): Date | null {
       const target = i;
       const dow = base.getDay();
       let delta = (target - dow + 7) % 7;
-      if (delta === 0) delta = 7; // next occurrence by default
+      if (delta === 0) delta = 7;
       if (nextPrefix) delta += 7;
       const d = new Date(base);
       d.setDate(d.getDate() + delta);
@@ -71,14 +71,12 @@ function nextOccurrenceForWeeklyRepeat(args: {
   const [sh, sm] = startTimeHHMM ? startTimeHHMM.split(':').map((v) => parseInt(v, 10)) : [0, 0];
   const todayDow = baseDay.getDay();
 
-  // try today first if it's included and start time hasn't passed
   if (daysOfWeek.includes(todayDow)) {
     const candidate = new Date(baseDay);
     candidate.setHours(sh, sm, 0, 0);
     if (!startTimeHHMM || candidate.getTime() >= now.getTime()) return candidate;
   }
 
-  // otherwise find the soonest next included weekday
   for (let delta = 1; delta <= 14; delta++) {
     const d = new Date(baseDay);
     d.setDate(d.getDate() + delta);
@@ -88,12 +86,11 @@ function nextOccurrenceForWeeklyRepeat(args: {
     }
   }
 
-  // fallback (shouldn't happen)
   return baseDay;
 }
 
 const API_KEY = process.env.GEMINI_API_KEY || '';
-const MODEL_NAME = process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite';
+const MODEL_NAME = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 
 const isValidApiKey = API_KEY && 
   API_KEY.trim() !== '' && 
@@ -198,7 +195,7 @@ Return ONLY the JSON array, nothing else.`;
         microTasks: microTasks.map((mt, idx) => ({
           ...mt,
           id: `micro-${Date.now()}-${idx}`,
-          parentTaskId: '', // Will be set by caller
+          parentTaskId: '',
           completed: false,
         })),
       });
@@ -281,8 +278,6 @@ Return ONLY the JSON object, nothing else.`;
       if (kind === 'event') {
         let startDate = parsed.startDate ? new Date(parsed.startDate) : new Date();
         if (Number.isNaN(startDate.getTime())) startDate = new Date();
-        // Guardrail: weekly repeats must start on the next real occurrence (including today if applicable),
-        // otherwise we don't block the calendar correctly and tasks can overlap.
         if (parsed.repeat?.frequency === 'weekly' && Array.isArray(parsed.repeat.daysOfWeek) && parsed.repeat.daysOfWeek.length) {
           startDate = nextOccurrenceForWeeklyRepeat({
             today: nowLocal,
@@ -291,7 +286,6 @@ Return ONLY the JSON object, nothing else.`;
           });
         }
 
-        // Guardrail: never return an event startDate in the past (in local terms)
         const start0 = new Date(startDate);
         start0.setHours(0, 0, 0, 0);
         if (start0 < todayLocal) startDate = new Date(todayLocal);
@@ -310,11 +304,9 @@ Return ONLY the JSON object, nothing else.`;
         });
       }
 
-      // TASK: Validate and set defaults
       const today = nowLocal;
       const inferred = inferDueDateFromText(text, today);
       const dueDateRaw = inferred ?? (parsed.dueDate ? new Date(parsed.dueDate) : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
-      // Guardrail: never return a due date in the past
       const today0 = new Date(todayLocal);
       const dueDate = dueDateRaw < today0 ? new Date(today0) : dueDateRaw;
       return NextResponse.json({
@@ -377,7 +369,6 @@ Return ONLY the JSON object, nothing else.`;
       const jsonText = extractJson(responseText);
       const scheduled = safeJsonParse<{ microTasks?: ScheduledMicroTask[] }>(jsonText);
 
-      // Fallback: if model didn't provide scheduledDate, spread tasks evenly across days until due date
       const due = task?.dueDate ? new Date(task.dueDate) : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
       const base = (scheduled.microTasks && scheduled.microTasks.length) ? scheduled.microTasks : (task.microTasks as ScheduledMicroTask[]);
       const safeBase = Array.isArray(base) ? base : [];
@@ -394,7 +385,6 @@ Return ONLY the JSON object, nothing else.`;
           d = new Date(due0);
           d.setDate(d.getDate() - (days - idx - 1));
         }
-        // Clamp into [today, due] so the model can never schedule into the past.
         if (d < today0) d = new Date(today0);
         if (d > due0) d = new Date(due0);
         return { ...mt, scheduledDate: d.toISOString().split('T')[0] };
@@ -468,8 +458,7 @@ Make micro-tasks specific, actionable, and time-bound. Ensure they build logical
     const message =
       error instanceof Error ? error.message : 'Failed to process request';
     console.error('Error with Gemini API:', error);
-    
-    // Detect network/connectivity issues
+
     const isNetworkError = 
       message.includes('fetch failed') ||
       message.includes('ECONNREFUSED') ||
