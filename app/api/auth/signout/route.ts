@@ -1,9 +1,13 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase';
+import { NextResponse } from 'next/server';
+import { isSupabaseConfigured } from '@/lib/supabase/config';
+import { createSupabaseRouteHandlerClient } from '@/lib/supabase/server';
 
-export async function POST(request: NextRequest) {
+export async function POST() {
   try {
-    const supabase = createServerClient();
+    if (!isSupabaseConfigured) {
+      return NextResponse.json({ success: true });
+    }
+    const supabase = await createSupabaseRouteHandlerClient();
     const { error } = await supabase.auth.signOut();
 
     if (error) {

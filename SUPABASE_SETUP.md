@@ -8,7 +8,7 @@ This guide will walk you through setting up Supabase for Google authentication a
 2. Click "Start your project" or "Sign in" if you already have an account
 3. Click "New Project"
 4. Fill in the project details:
-   - **Name**: `focusflow` (or any name you prefer)
+   - **Name**: `flowly` (or any name you prefer)
    - **Database Password**: Create a strong password (save this!)
    - **Region**: Choose the closest region to you
    - **Pricing Plan**: Free tier is fine for development
@@ -59,7 +59,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key-here
 
 ```env
 GEMINI_API_KEY=your_gemini_api_key_here
-GEMINI_MODEL=gemini-2.5-flash-lite
+GEMINI_MODEL=gemini-3.1-flash-lite
 
 # Supabase Configuration
 NEXT_PUBLIC_SUPABASE_URL=https://your-project-ref.supabase.co

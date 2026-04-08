@@ -1,30 +1,14 @@
 'use client';
 
 import { useEffect, useMemo } from 'react';
-import { Sparkles, Flame } from 'lucide-react';
+import Link from 'next/link';
+import { Sparkles, Flame, Timer } from 'lucide-react';
 import { useStore } from '@/lib/store';
+import { getDailyQuote } from '@/lib/daily-quote';
 
-// Daily motivational quotes that work from day one
-const dailyQuotes = [
-  "Today is a fresh start. Make it count!",
-  "Set your intention for today and make it happen.",
-  "This moment is your opportunity. Seize it!",
-  "What you do today matters. Choose wisely!",
-  "Make today so productive that yesterday gets jealous.",
-  "Today is the perfect day to make progress.",
-  "Your future depends on what you do today. Make it great!",
-  "Wake up with determination. Go to bed with satisfaction.",
-  "Today's small steps become tomorrow's giant leaps.",
-  "Every expert was once a beginner. Keep going!",
-  "You don't have to be great to start, but you have to start to be great.",
-  "The way to get started is to quit talking and begin doing.",
-  "Believe you can and you're halfway there.",
-  "Your potential is limitless. Keep pushing forward!",
-  "Small progress is still progress. Celebrate every step!",
-];
-
-export default function DailyMotivation() {
+export default function DailyMotivation({ variant = 'default' }: { variant?: 'default' | 'compact' }) {
   const { stats, pomodoroSessions, tasks, updateStats, motivationPreferences } = useStore();
+  const compact = variant === 'compact';
 
   useEffect(() => {
     // Update stats to ensure streak is calculated
@@ -32,64 +16,82 @@ export default function DailyMotivation() {
   }, [pomodoroSessions, updateStats]);
 
   const dailyQuote = useMemo(() => {
-    // Consistent for the day, without setState-in-effect
-    const today = new Date();
-    const dayOfYear = Math.floor(
-      (today.getTime() - new Date(today.getFullYear(), 0, 0).getTime()) / (1000 * 60 * 60 * 24)
-    );
-    const quoteIndex = dayOfYear % dailyQuotes.length;
-    return dailyQuotes[quoteIndex];
+    return getDailyQuote();
   }, []);
 
   const totalFocusHours = stats.totalFocusMinutes / 60;
   const hasAnyProgress = totalFocusHours > 0 || tasks.length > 0 || pomodoroSessions.length > 0;
 
   return (
-    <div className="bg-white rounded-xl p-5 border border-[#E8E6DC] shadow-sm">
-      <div className="flex items-center gap-2 mb-4">
-        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#6A9BCC]/20 to-[#788C5D]/20 flex items-center justify-center">
-          <Sparkles className="w-4 h-4 text-[#6A9BCC]" />
+    <div
+      className={`bg-white border border-[#E8E6DC] ${compact ? 'rounded-lg p-3 shadow-none' : 'rounded-xl p-5 shadow-sm'}`}
+    >
+      <div className={`flex items-center gap-2 ${compact ? 'mb-2' : 'mb-4'}`}>
+        <div
+          className={`rounded-md bg-gradient-to-br from-[#6A9BCC]/15 to-[#788C5D]/15 flex items-center justify-center ${compact ? 'w-7 h-7' : 'w-8 h-8 rounded-lg'}`}
+        >
+          <Sparkles className={`text-[#6A9BCC] ${compact ? 'w-3.5 h-3.5' : 'w-4 h-4'}`} />
         </div>
         <div>
-          <h3 className="font-heading font-semibold text-base text-[#141413]">
-            Daily Motivation
+          <h3 className={`font-heading text-[#141413] ${compact ? 'text-sm font-medium' : 'text-base font-semibold'}`}>
+            {compact ? 'Today' : 'Daily motivation'}
           </h3>
         </div>
       </div>
 
-      {/* Daily Quote - Compact */}
-      <div className="mb-4 p-3 bg-gradient-to-br from-[#FAF9F5] to-[#E8E6DC]/30 rounded-lg border border-[#E8E6DC]">
-        <p className="text-sm font-body text-[#141413] italic leading-relaxed">
-          “{dailyQuote}”
-        </p>
+      <div
+        className={`bg-[#FAF9F5] rounded-md border border-[#E8E6DC]/80 ${compact ? 'mb-2 p-2.5' : 'mb-4 p-3 rounded-lg border-[#E8E6DC]'}`}
+      >
+        <p className={`font-body text-[#141413] leading-relaxed ${compact ? 'text-xs' : 'text-sm'}`}>{dailyQuote}</p>
       </div>
 
       {motivationPreferences.personalGoal && (
-        <div className="mb-4 p-3 bg-[#FAF9F5] rounded-lg border border-[#E8E6DC]">
-          <div className="text-xs text-[#B0AEA5] font-heading mb-1">Your goal</div>
-          <div className="text-sm font-heading font-semibold text-[#141413]">
+        <div className={`bg-[#FAF9F5] rounded-md border border-[#E8E6DC]/80 ${compact ? 'mb-2 p-2.5' : 'mb-4 p-3 rounded-lg border-[#E8E6DC]'}`}>
+          <div className="text-[10px] text-[#B0AEA5] font-heading uppercase tracking-wide mb-0.5">Goal</div>
+          <div className={`font-heading font-medium text-[#141413] ${compact ? 'text-xs' : 'text-sm font-semibold'}`}>
             {motivationPreferences.personalGoal}
           </div>
         </div>
       )}
 
-      {/* Streak Display - Compact */}
-      <div className="flex items-center justify-between p-3 bg-[#FAF9F5] rounded-lg border border-[#E8E6DC]">
-        <div className="flex items-center gap-2">
-          <Flame className="w-4 h-4 text-[#D97757]" />
-          <div>
-            <div className="text-xs text-[#B0AEA5] font-heading">Streak</div>
-            <div className="text-lg font-heading font-bold text-[#141413]">
-              {stats.currentStreak} {stats.currentStreak === 1 ? 'day' : 'days'}
+      <div className={`bg-[#FAF9F5] rounded-md border border-[#E8E6DC]/80 space-y-1 ${compact ? 'p-2.5' : 'p-3 rounded-lg border-[#E8E6DC] space-y-2'}`}>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Flame className={`text-[#D97757] ${compact ? 'w-3.5 h-3.5' : 'w-4 h-4'}`} />
+            <div>
+              <div className="text-[10px] text-[#B0AEA5] font-heading uppercase tracking-wide">Streak</div>
+              <div className={`font-heading font-semibold text-[#141413] ${compact ? 'text-sm' : 'text-lg font-bold'}`}>
+                {stats.currentStreak} {stats.currentStreak === 1 ? 'day' : 'days'}
+              </div>
             </div>
           </div>
+          {stats.currentStreak === 0 && !hasAnyProgress && (
+            <div className="text-right">
+              <div className="text-xs font-semibold text-[#6A9BCC]">Finish a focus session</div>
+            </div>
+          )}
         </div>
-        {stats.currentStreak === 0 && !hasAnyProgress && (
-          <div className="text-right">
-            <div className="text-xs font-semibold text-[#6A9BCC]">Start now!</div>
-          </div>
-        )}
+        <p className={`text-[#B0AEA5] leading-snug ${compact ? 'text-[10px]' : 'text-[11px]'}`}>
+          One completed focus session per day keeps the streak (Pomodoro on the Focus page).
+        </p>
       </div>
+
+      {compact ? (
+        <div className="mt-2.5 pt-2.5 border-t border-[#E8E6DC]/80">
+          <p className="text-[10px] text-[#B0AEA5] font-body leading-snug mb-2">
+            {stats.totalFocusMinutes < 1
+              ? 'Run the timer once to start your streak and feed the forest.'
+              : `${Math.floor(stats.totalFocusMinutes)} focus minutes logged — keep going.`}
+          </p>
+          <Link
+            href="/focus"
+            className="inline-flex items-center gap-1.5 text-[11px] font-heading font-semibold text-[#6A9BCC] hover:text-[#4a7aad]"
+          >
+            <Timer className="w-3.5 h-3.5 shrink-0" />
+            Open focus timer
+          </Link>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -1,82 +1,86 @@
-# Deploy Focusflow to Vercel
+# Deploy Flowly to Vercel (GitHub)
 
-## 1. Push your code to GitHub
+## 1. Create the GitHub repo
 
-If you haven’t already:
+1. On GitHub: **New repository** → name it e.g. **`flowly`** (or any name you like).
+2. Push this Next.js app so the **repository root** is the folder that contains `package.json` (the `student-scheduler` app directory).
 
 ```bash
-cd student-scheduler
+cd /path/to/student-scheduler   # folder with package.json named "flowly"
 git add .
-git commit -m "Ready for Vercel deploy"
+git commit -m "Flowly: ready for Vercel"
 git branch -M main
-git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git
+git remote add origin https://github.com/YOUR_USERNAME/flowly.git
 git push -u origin main
 ```
 
-(Create the repo on GitHub first: https://github.com/new)
+If the repo already exists and uses a **parent monorepo**, set **Root Directory** on Vercel to the subfolder that contains `package.json` (e.g. `student-scheduler`).
 
 ---
 
-## 2. Deploy on Vercel
+## 2. Create the Vercel project **flowly**
 
-1. Go to **https://vercel.com** and sign in (GitHub is easiest).
-2. Click **Add New…** → **Project**.
-3. **Import** your GitHub repo (the one that contains `student-scheduler`).
-4. **Root Directory:** If your repo is only the app, leave as `.`.  
-   If the repo is the whole project (e.g. "IB Design MYP5") and the app is in a subfolder, set **Root Directory** to `student-scheduler`.
-5. **Framework Preset:** Next.js (auto-detected).
-6. **Build Command:** `npm run build` (default).
-7. **Output Directory:** leave default.
-8. **Install Command:** `npm install` (default).
+1. Go to **https://vercel.com** → sign in with **GitHub**.
+2. **Add New…** → **Project** → **Import** your repo.
+3. **Project name:** set to **`flowly`** (this controls the default URL: `https://flowly.vercel.app` if available).
+4. **Root Directory:** `.` if `package.json` is at the repo root; otherwise pick the app subfolder.
+5. **Framework:** Next.js (auto-detected). **Build:** `npm run build` (default).
 
 ---
 
 ## 3. Environment variables
 
-In the Vercel project import screen (or later: **Project → Settings → Environment Variables**), add:
+In **Project → Settings → Environment Variables** (or during import), add:
 
-| Name | Value | Notes |
-|------|--------|--------|
-| `GEMINI_API_KEY` | Your Gemini API key | From Google AI Studio |
-| `GEMINI_MODEL` | `gemini-2.5-flash-lite` | Optional; this is the default |
-| `NEXT_PUBLIC_SUPABASE_URL` | `https://YOUR_PROJECT.supabase.co` | From Supabase dashboard |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Your anon/public key | From Supabase → Settings → API |
+| Name | Required | Notes |
+|------|----------|--------|
+| `GEMINI_API_KEY` | Yes* | From [Google AI Studio](https://aistudio.google.com/apikey). Server-side AI. |
+| `NEXT_PUBLIC_SUPABASE_URL` | Yes | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Yes | Supabase anon/public key |
+| `GEMINI_MODEL` | No | e.g. `gemini-3.1-flash-lite-preview` — must match a model your key can call |
+| `AI_USER_KEY_ENCRYPTION_SECRET` | Recommended | Random string **16+ characters** (not your Gemini key). Encrypts users’ saved BYOK keys. If omitted, the app can derive encryption from `GEMINI_API_KEY` instead. |
+| `AI_SHARED_DAILY_LIMIT` | No | Default `5` — shared AI turns per signed-in user per day when using the server key |
+| `NEXT_PUBLIC_SITE_URL` | No | Canonical site URL, e.g. `https://flowly.vercel.app` — helps OG metadata |
 
-- Add them for **Production** (and optionally Preview if you want).
-- Do **not** commit `.env.local`; Vercel uses these variables instead.
+\*If you only rely on per-user keys and skip server Gemini, you still need Supabase; server AI typically needs `GEMINI_API_KEY`.
+
+Add for **Production** (and **Preview** if you want previews to work the same).
+
+Do **not** commit `.env.local`.
 
 ---
 
-## 4. Supabase redirect URL (for Google Sign-in)
+## 4. Supabase auth redirect URLs
 
-After your first deploy, you’ll get a URL like `https://your-app.vercel.app`.
+After the first deploy, copy your production URL (e.g. `https://flowly.vercel.app`).
 
-1. Open **Supabase Dashboard** → your project → **Authentication** → **URL Configuration**.
-2. Under **Redirect URLs**, add:
-   - `https://your-app.vercel.app/auth/callback`
-   - `https://*.vercel.app/auth/callback` (optional; for preview deployments)
-
-Save. Google Sign-in will then work on your Vercel domain.
+1. **Supabase** → **Authentication** → **URL Configuration**.
+2. **Site URL:** your production URL.
+3. **Redirect URLs**, add:
+   - `https://flowly.vercel.app/auth/callback` (use your real host)
+   - `https://*.vercel.app/auth/callback` (optional, for preview deployments)
 
 ---
 
 ## 5. Deploy
 
-Click **Deploy**. Vercel will build and deploy. When it’s done, open the provided URL (e.g. `https://student-scheduler-xxx.vercel.app`).
+Click **Deploy**. Fix any build errors from the Vercel log, then redeploy.
 
 ---
 
 ## 6. Custom domain (optional)
 
-In Vercel: **Project → Settings → Domains** → add your domain and follow the DNS instructions.
+**Project → Settings → Domains** → add your domain and follow DNS steps.
 
 ---
 
 ## Quick checklist
 
-- [ ] Code pushed to GitHub
-- [ ] Vercel project created and repo connected
-- [ ] Root directory set to `student-scheduler` if app is in a subfolder
-- [ ] `GEMINI_API_KEY`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` set in Vercel
-- [ ] Supabase redirect URL includes `https://YOUR_VERCEL_URL/auth/callback`
-- [ ] Deploy triggered and build succeeded
+- [ ] GitHub repo pushed; root matches Vercel **Root Directory**
+- [ ] Vercel project named **flowly** (or your choice)
+- [ ] `GEMINI_API_KEY`, Supabase URL + anon key set
+- [ ] Optional: `AI_USER_KEY_ENCRYPTION_SECRET`, `NEXT_PUBLIC_SITE_URL`
+- [ ] Supabase redirect URLs include `https://YOUR_HOST/auth/callback`
+- [ ] Production deploy green
+
+See also **`VERCEL_ENV_VARS.txt`** for a copy-paste-oriented list.

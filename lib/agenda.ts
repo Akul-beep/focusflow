@@ -65,9 +65,7 @@ export function getDayAgenda(args: {
   // Tasks: include timed micro-tasks (scheduledStart) and day-only planned ones (scheduledDate)
   const taskSteps: Array<{ task: Task; microTask: MicroTask }> = [];
   for (const task of args.tasks) {
-    if (task.completed) continue;
     for (const mt of task.microTasks) {
-      if (mt.completed) continue;
 
       // Be defensive: scheduledStart/scheduledEnd may come back as strings after persistence/AI.
       const scheduledStart = asDate((mt as any).scheduledStart);

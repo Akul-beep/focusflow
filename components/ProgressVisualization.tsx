@@ -80,7 +80,7 @@ export default function ProgressVisualization() {
             <div className="text-2xl font-heading font-bold text-[#141413] mb-1">
               {stats.currentStreak}
             </div>
-            <div className="text-xs text-[#B0AEA5] font-heading">Streak</div>
+            <div className="text-xs text-[#B0AEA5] font-heading">Focus streak</div>
           </div>
         </div>
       </div>

@@ -3,6 +3,7 @@
 import { useStore } from '@/lib/store';
 import { TreePine } from 'lucide-react';
 import { useEffect, useMemo } from 'react';
+import Link from 'next/link';
 
 interface Tree {
   id: number;
@@ -10,6 +11,12 @@ interface Tree {
   x: number; // position
   color: string;
 }
+
+/** Fixed growth stats for marketing previews (ignores live store numbers). */
+export type TreeForestPreviewGrowth = {
+  totalFocusMinutes: number;
+  microTasksCompleted?: number;
+};
 
 const TREE_COLORS = [
   '#788C5D', // green
@@ -19,20 +26,29 @@ const TREE_COLORS = [
   '#6B8E5A', // olive
 ];
 
-export default function TreeForest(props: { variant?: 'default' | 'compact'; extraGrowthMinutes?: number } = {}) {
+export default function TreeForest(
+  props: {
+    variant?: 'default' | 'compact';
+    extraGrowthMinutes?: number;
+    showFocusHint?: boolean;
+    previewGrowth?: TreeForestPreviewGrowth;
+  } = {}
+) {
   const { stats, updateStats } = useStore();
   const variant = props.variant || 'default';
+  const preview = props.previewGrowth;
 
   useEffect(() => {
+    if (preview) return;
     updateStats();
-  }, [updateStats]);
+  }, [preview, updateStats]);
 
   const trees = useMemo(() => {
     // Show growth from day one:
     // - Seed always visible
     // - Forest grows with focus minutes, but also with completed micro-tasks (for students who start by checking steps)
-    const focusMinutes = stats.totalFocusMinutes;
-    const microBoostMinutes = stats.microTasksCompleted * 5; // 5 minutes credit per completed step
+    const focusMinutes = preview ? preview.totalFocusMinutes : stats.totalFocusMinutes;
+    const microBoostMinutes = (preview ? preview.microTasksCompleted ?? 0 : stats.microTasksCompleted) * 5; // 5 minutes credit per completed step
     const extra = Math.max(0, props.extraGrowthMinutes || 0);
     const totalGrowthMinutes = focusMinutes + microBoostMinutes + extra;
 
@@ -81,9 +97,17 @@ export default function TreeForest(props: { variant?: 'default' | 'compact'; ext
     }
 
     return newTrees;
-  }, [stats.totalFocusMinutes, stats.microTasksCompleted, props.extraGrowthMinutes]);
+  }, [
+    preview,
+    stats.totalFocusMinutes,
+    stats.microTasksCompleted,
+    props.extraGrowthMinutes,
+  ]);
 
-  const totalGrowthMinutes = stats.totalFocusMinutes + stats.microTasksCompleted * 5 + Math.max(0, props.extraGrowthMinutes || 0);
+  const totalGrowthMinutes =
+    (preview ? preview.totalFocusMinutes : stats.totalFocusMinutes) +
+    (preview ? preview.microTasksCompleted ?? 0 : stats.microTasksCompleted) * 5 +
+    Math.max(0, props.extraGrowthMinutes || 0);
   const minutesPerTick = 10;
   const minutesPerTree = 30;
   const ticksPerTree = Math.max(1, Math.round(minutesPerTree / minutesPerTick));
@@ -93,16 +117,22 @@ export default function TreeForest(props: { variant?: 'default' | 'compact'; ext
   const ticksEarned = Math.min(ticksPerTree, Math.floor(minutesIntoCurrentTree / minutesPerTick));
 
   return (
-    <div className={`bg-white rounded-xl border border-[#E8E6DC] shadow-sm ${variant === 'compact' ? 'p-4' : 'p-6'}`}>
-      <div className={`flex items-center gap-3 ${variant === 'compact' ? 'mb-3' : 'mb-6'}`}>
-        <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-[#788C5D]/20 to-[#6A9BCC]/20 flex items-center justify-center">
-          <TreePine className="w-5 h-5 text-[#788C5D]" />
+    <div
+      className={`bg-white border border-[#E8E6DC] ${variant === 'compact' ? 'rounded-lg p-3 shadow-none' : 'rounded-xl p-6 shadow-sm'}`}
+    >
+      <div className={`flex items-center gap-2 ${variant === 'compact' ? 'mb-2' : 'mb-6'}`}>
+        <div
+          className={`rounded-md bg-gradient-to-br from-[#788C5D]/15 to-[#6A9BCC]/15 flex items-center justify-center ${variant === 'compact' ? 'w-8 h-8' : 'w-10 h-10 rounded-lg'}`}
+        >
+          <TreePine className={`text-[#788C5D] ${variant === 'compact' ? 'w-4 h-4' : 'w-5 h-5'}`} />
         </div>
-        <div className="flex-1">
-          <h3 className="font-heading font-semibold text-lg text-[#141413]">
-            Growth Forest
+        <div className="flex-1 min-w-0">
+          <h3 className={`font-heading font-medium text-[#141413] ${variant === 'compact' ? 'text-sm' : 'text-lg font-semibold'}`}>
+            Growth forest
           </h3>
-          <p className="text-xs text-[#B0AEA5]">Your progress visualized</p>
+          {!variant || variant === 'default' ? (
+            <p className="text-xs text-[#B0AEA5]">Your progress visualized</p>
+          ) : null}
         </div>
       </div>
 
@@ -186,34 +216,49 @@ export default function TreeForest(props: { variant?: 'default' | 'compact'; ext
       </div>
 
       {/* Stats */}
-      <div className="space-y-3">
+      <div className={variant === 'compact' ? 'space-y-2' : 'space-y-3'}>
         <div className="flex items-center justify-between">
-          <span className="text-sm font-heading text-[#141413]">
-            Trees Planted
+          <span className={`font-heading text-[#141413] ${variant === 'compact' ? 'text-xs' : 'text-sm'}`}>
+            Trees planted
           </span>
-          <span className="text-lg font-heading font-bold text-[#141413]">
+          <span className={`font-heading font-semibold text-[#141413] ${variant === 'compact' ? 'text-sm' : 'text-lg font-bold'}`}>
             {treesPlanted}
           </span>
         </div>
-        
-        <div className="flex items-center justify-between text-xs text-[#B0AEA5]">
-          <span>Growth time: {Math.floor(totalGrowthMinutes)} min</span>
-          <span>Next tree in {Math.max(0, Math.ceil(nextTreeAtMinutes - totalGrowthMinutes))} min</span>
+
+        <div
+          className={`flex items-center justify-between text-[#B0AEA5] ${variant === 'compact' ? 'text-[10px]' : 'text-xs'}`}
+        >
+          <span>{Math.floor(totalGrowthMinutes)} min growth</span>
+          <span>Next {Math.max(0, Math.ceil(nextTreeAtMinutes - totalGrowthMinutes))} min</span>
         </div>
 
         {/* Progress bar (tick-based) */}
-        <div className="w-full h-2 bg-[#E8E6DC] rounded-full overflow-hidden">
+        <div className={`w-full bg-[#E8E6DC] rounded-full overflow-hidden ${variant === 'compact' ? 'h-1' : 'h-2'}`}>
           <div
             className="h-full bg-[#788C5D] transition-all duration-500 rounded-full"
             style={{ width: `${Math.min(100, (minutesIntoCurrentTree / minutesPerTree) * 100)}%` }}
           />
         </div>
 
-        <div className="flex items-center justify-between text-[11px] text-[#B0AEA5] font-heading">
-          <span>Today’s growth: {ticksEarned}/{ticksPerTree} ticks</span>
-          <span>+1 tick every {minutesPerTick} min</span>
+        <div
+          className={`flex items-center justify-between text-[#B0AEA5] font-heading ${variant === 'compact' ? 'text-[10px]' : 'text-[11px]'}`}
+        >
+          <span>
+            {ticksEarned}/{ticksPerTree} ticks
+          </span>
+          <span>+1 / {minutesPerTick} min</span>
         </div>
       </div>
+
+      {variant === 'compact' && props.showFocusHint ? (
+        <Link
+          href="/focus"
+          className="mt-2.5 block text-center text-[10px] font-heading font-semibold text-[#6A9BCC] hover:text-[#4a7aad] pt-2 border-t border-[#E8E6DC]/80"
+        >
+          Focus timer grows this forest →
+        </Link>
+      ) : null}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseRouteHandlerClient } from '@/lib/supabase/server';
-import { encryptUserGroqKey, isValidGroqKeyFormat } from '@/lib/ai-user-groq-key-crypto';
+import { encryptUserGroqKey, isValidUserGeminiApiKeyFormat } from '@/lib/ai-user-groq-key-crypto';
 
 export async function GET() {
   const supabase = await createSupabaseRouteHandlerClient();
@@ -34,9 +34,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
   const key = typeof body === 'object' && body !== null && 'key' in body ? String((body as { key?: unknown }).key || '').trim() : '';
-  if (!isValidGroqKeyFormat(key)) {
+  if (!isValidUserGeminiApiKeyFormat(key)) {
     return NextResponse.json(
-      { error: 'That does not look like a Groq API key (should start with gsk_).' },
+      { error: 'That does not look like a Gemini API key (should start with AIza…).' },
       { status: 400 }
     );
   }

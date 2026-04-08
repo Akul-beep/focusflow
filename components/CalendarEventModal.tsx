@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { X, Clock, MapPin, Repeat, Calendar as CalendarIcon } from 'lucide-react';
 import { useStore } from '@/lib/store';
 import { CalendarEvent } from '@/types';
+import { localDateKey } from '@/lib/local-date';
 
 interface CalendarEventModalProps {
   isOpen: boolean;
@@ -41,9 +42,9 @@ export default function CalendarEventModal({ isOpen, onClose, selectedDate, even
   const [formData, setFormData] = useState({
     title: event?.title || '',
     description: event?.description || '',
-    startDate: initialStart.toISOString().split('T')[0],
+    startDate: localDateKey(initialStart),
     startTime: initialStart.toTimeString().slice(0, 5),
-    endDate: initialEnd.toISOString().split('T')[0],
+    endDate: localDateKey(initialEnd),
     endTime: initialEnd.toTimeString().slice(0, 5),
     allDay: event?.allDay || false,
     eventType: (event?.eventType || 'class') as CalendarEvent['eventType'],
@@ -51,7 +52,7 @@ export default function CalendarEventModal({ isOpen, onClose, selectedDate, even
     repeat: !!event?.repeat,
     repeatFrequency: (event?.repeat?.frequency || 'weekly') as 'daily' | 'weekly' | 'monthly' | 'yearly',
     repeatInterval: event?.repeat?.interval || 1,
-    repeatEndDate: event?.repeat?.endDate ? new Date(event.repeat.endDate).toISOString().split('T')[0] : '',
+    repeatEndDate: event?.repeat?.endDate ? localDateKey(new Date(event.repeat.endDate)) : '',
     daysOfWeek: event?.repeat?.daysOfWeek || ([] as number[]),
   });
 
@@ -102,8 +103,8 @@ export default function CalendarEventModal({ isOpen, onClose, selectedDate, even
   const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 bg-black/50 z-[11000] flex items-center justify-center p-4">
+      <div className="relative z-[11001] bg-white rounded-xl shadow-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
         <div className="sticky top-0 bg-white border-b border-[#E8E6DC] px-6 py-4 flex items-center justify-between">
           <h2 className="font-heading font-bold text-xl text-[#141413]">
             {event ? 'Edit Event' : 'Create Event'}

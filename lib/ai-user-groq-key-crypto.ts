@@ -3,14 +3,43 @@ import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'crypt
 const SALT = 'focusflow-ai-user-key-v1';
 const ALGO = 'aes-256-gcm';
 
-function deriveKey(): Buffer {
-  const secret = process.env.AI_USER_KEY_ENCRYPTION_SECRET?.trim();
-  if (!secret || secret.length < 16) {
-    throw new Error('Server misconfigured: AI_USER_KEY_ENCRYPTION_SECRET (min 16 chars) is required to store user Groq keys.');
-  }
-  return scryptSync(secret, SALT, 32);
+function isPlausibleServerGeminiKey(raw: string): boolean {
+  const k = raw.trim();
+  return (
+    k.length >= 30 &&
+    k.startsWith('AIza') &&
+    !k.includes('PASTE_YOUR_KEY_HERE') &&
+    !k.toLowerCase().includes('your_')
+  );
 }
 
+/**
+ * Prefer a dedicated secret; if missing, derive from server GEMINI_API_KEY so BYOK works on single-key deploys.
+ * Rotating GEMINI_API_KEY without AI_USER_KEY_ENCRYPTION_SECRET will invalidate stored user keys until they re-save.
+ */
+function deriveKey(): Buffer {
+  const dedicated = process.env.AI_USER_KEY_ENCRYPTION_SECRET?.trim();
+  if (dedicated && dedicated.length >= 16) {
+    return scryptSync(dedicated, SALT, 32);
+  }
+
+  const gemini = process.env.GEMINI_API_KEY?.trim() || '';
+  if (isPlausibleServerGeminiKey(gemini)) {
+    return scryptSync(`focusflow-user-cred-wrap|${gemini}`, SALT, 32);
+  }
+
+  throw new Error(
+    'Could not save your key securely. Add AI_USER_KEY_ENCRYPTION_SECRET (any random string, 16+ characters) to the server environment and restart — this is not your Gemini key; it only encrypts saved keys. Alternatively set a valid GEMINI_API_KEY on the server.'
+  );
+}
+
+/** Google Gemini / Generative Language API keys start with `AIza`. */
+export function isValidUserGeminiApiKeyFormat(key: string): boolean {
+  const k = key.trim();
+  return k.startsWith('AIza') && k.length >= 30;
+}
+
+/** @deprecated Legacy Groq keys; BYOK is Gemini-only now. */
 export function isValidGroqKeyFormat(key: string): boolean {
   const k = key.trim();
   return k.startsWith('gsk_') && k.length > 20;

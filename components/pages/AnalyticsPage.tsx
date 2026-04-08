@@ -2,6 +2,7 @@
 
 import { useStore } from '@/lib/store';
 import Sidebar from '@/components/Sidebar';
+import PageHeader, { PAGE_MAIN_CLASSES } from '@/components/PageHeader';
 import TreeForest from '@/components/TreeForest';
 import ProgressVisualization from '@/components/ProgressVisualization';
 import { useState } from 'react';
@@ -13,8 +14,16 @@ export default function AnalyticsPage() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const weekStart = startOfWeek(new Date());
-  const weeklySessions = pomodoroSessions.filter((s) => s.completed && s.endTime && new Date(s.endTime) >= weekStart);
+  const weeklySessions = pomodoroSessions.filter(
+    (s) =>
+      s.completed &&
+      s.endTime &&
+      new Date(s.endTime) >= weekStart &&
+      (!s.type || s.type === 'focus')
+  );
   const weeklyHours = weeklySessions.reduce((acc, s) => acc + s.duration, 0) / 60;
+  const weeklyGoal = stats.weeklyGoal > 0 ? stats.weeklyGoal : 20;
+  const weeklyPct = Math.min(100, (weeklyHours / weeklyGoal) * 100);
 
   const totalMicroTasks = tasks.reduce((acc, t) => acc + t.microTasks.length, 0);
   const completedMicroTasks = tasks.reduce((acc, t) => acc + t.microTasks.filter((mt) => mt.completed).length, 0);
@@ -24,22 +33,13 @@ export default function AnalyticsPage() {
     <div className="min-h-screen bg-[#FAF9F5] flex">
       <Sidebar />
 
-      <div className="flex-1 ml-64">
-        <header className="bg-white border-b border-[#E8E6DC] sticky top-0 z-40">
-          <div className="px-8 py-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h1 className="font-heading font-bold text-3xl text-[#141413] mb-1">Analytics</h1>
-                <p className="text-sm text-[#B0AEA5]">Track your progress and insights</p>
-              </div>
-            </div>
-          </div>
-        </header>
+      <div className="flex-1 w-full md:ml-60 pb-20 md:pb-0 min-w-0">
+        <PageHeader title="Analytics" subtitle="Track your progress and insights" />
 
-        <main className="p-8">
-          <div className="grid grid-cols-4 gap-6">
-            <div className="col-span-3 space-y-6">
-              <div className="grid grid-cols-3 gap-4">
+        <main className={PAGE_MAIN_CLASSES}>
+          <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
+            <div className="xl:col-span-3 space-y-6">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="bg-white rounded-xl p-6 border border-[#E8E6DC] shadow-sm">
                   <div className="flex items-center gap-3 mb-4">
                     <div className="w-10 h-10 rounded-lg bg-[#6A9BCC]/10 flex items-center justify-center">
@@ -69,9 +69,14 @@ export default function AnalyticsPage() {
                     <div className="w-10 h-10 rounded-lg bg-[#D97757]/10 flex items-center justify-center">
                       <Target className="w-5 h-5 text-[#D97757]" />
                     </div>
-                    <div className="flex-1">
+                    <div className="flex-1 min-w-0">
                       <div className="text-sm text-[#B0AEA5] font-heading">Weekly Progress</div>
-                      <div className="text-2xl font-heading font-bold text-[#141413]">{weeklyHours.toFixed(1)}h</div>
+                      <div className="text-2xl font-heading font-bold text-[#141413]">
+                        {weeklyHours.toFixed(1)}h / {weeklyGoal}h
+                      </div>
+                      <div className="mt-2 h-1.5 bg-[#E8E6DC] rounded-full overflow-hidden">
+                        <div className="h-full bg-[#D97757] rounded-full transition-all" style={{ width: `${weeklyPct}%` }} />
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -88,7 +93,7 @@ export default function AnalyticsPage() {
               </div>
             </div>
 
-            <div className="relative">
+            <div className="relative xl:col-span-1">
               <button
                 onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
                 className="absolute -left-4 top-0 z-10 w-8 h-8 bg-white border border-[#E8E6DC] rounded-full flex items-center justify-center hover:bg-[#FAF9F5] transition-colors shadow-sm"
@@ -106,7 +111,7 @@ export default function AnalyticsPage() {
                     <h3 className="font-heading font-semibold text-lg text-[#141413] mb-4">Insights</h3>
                     <div className="space-y-4 text-sm">
                       <div>
-                        <div className="text-[#B0AEA5] mb-1">Current Streak</div>
+                        <div className="text-[#B0AEA5] mb-1">Focus streak</div>
                         <div className="font-heading font-semibold text-[#141413] text-lg">{stats.currentStreak} days</div>
                       </div>
                       <div>
@@ -116,6 +121,12 @@ export default function AnalyticsPage() {
                       <div>
                         <div className="text-[#B0AEA5] mb-1">Micro-tasks Done</div>
                         <div className="font-heading font-semibold text-[#141413] text-lg">{stats.microTasksCompleted}</div>
+                      </div>
+                      <div>
+                        <div className="text-[#B0AEA5] mb-1">Momentum score</div>
+                        <div className="font-heading font-semibold text-[#141413] text-lg">
+                          L{stats.level} · {stats.focusCoins} pts
+                        </div>
                       </div>
                     </div>
                   </div>

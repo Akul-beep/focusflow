@@ -1,21 +1,37 @@
 # Environment Setup
 
-Create a `.env.local` file in the root directory with the following:
+Create a `.env.local` file in the project root (`student-scheduler/.env.local`).
+
+## Default: Gemini (recommended)
 
 ```
 GEMINI_API_KEY=your_gemini_api_key_here
-GEMINI_MODEL=gemini-2.5-flash-lite
+GEMINI_MODEL=gemini-3.1-flash-lite
 ```
 
-## Getting a Gemini API Key
+1. Open [Google AI Studio](https://makersuite.google.com/app/apikey)  
+2. Create an API key  
+3. Paste into `.env.local` and restart `npm run dev`
 
-1. Visit [Google AI Studio](https://makersuite.google.com/app/apikey)
-2. Sign in with your Google account
-3. Click "Create API Key"
-4. Copy the key and paste it into your `.env.local` file
+Optional: add Groq as fallback or override:
 
-## Important Notes
+```
+GROQ_API_KEY=gsk_your_key_here
+GROQ_MODEL=llama-3.3-70b-versatile
+```
 
-- Never commit `.env.local` to version control
-- The API key is used server-side only for security
-- This project reads the model name from `GEMINI_MODEL`. Default is `gemini-2.5-flash-lite`.
+## Provider override (optional)
+
+If you want to force a provider order:
+
+```
+AI_PROVIDER=gemini   # Gemini first
+# or
+AI_PROVIDER=groq     # Groq first
+```
+
+## Important notes
+
+- Never commit `.env.local` to version control  
+- Keys are used **server-side** only (`app/api/gemini/route.ts` — unified AI route)  
+- With no `AI_PROVIDER`, the app uses **Gemini first** and **Groq fallback** (when both keys are configured).

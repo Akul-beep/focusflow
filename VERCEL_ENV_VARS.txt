@@ -1,0 +1,48 @@
+============================================
+FLOWLY – VERCEL ENVIRONMENT VARIABLES
+============================================
+
+Vercel: Project → Settings → Environment Variables
+Copy values from your local .env.local where applicable.
+
+--------------------------------------------
+NAME:  GEMINI_API_KEY
+VALUE: (Gemini key from https://aistudio.google.com/apikey)
+--------------------------------------------
+
+--------------------------------------------
+NAME:  GEMINI_MODEL
+VALUE: gemini-3.1-flash-lite-preview
+       (or another model your API key supports)
+--------------------------------------------
+
+--------------------------------------------
+NAME:  NEXT_PUBLIC_SUPABASE_URL
+VALUE: https://xxxxx.supabase.co
+--------------------------------------------
+
+--------------------------------------------
+NAME:  NEXT_PUBLIC_SUPABASE_ANON_KEY
+VALUE: (Supabase anon / public key)
+--------------------------------------------
+
+--------------------------------------------
+NAME:  AI_USER_KEY_ENCRYPTION_SECRET
+VALUE: (any random string, 16+ characters — NOT your Gemini key)
+       Recommended for production BYOK (saved user keys).
+--------------------------------------------
+
+--------------------------------------------
+NAME:  NEXT_PUBLIC_SITE_URL
+VALUE: https://flowly.vercel.app
+       (your real production URL — helps SEO / Open Graph)
+--------------------------------------------
+
+--------------------------------------------
+NAME:  AI_SHARED_DAILY_LIMIT
+VALUE: 5
+       (optional; 0 disables shared daily cap logic edge cases)
+--------------------------------------------
+
+Add for Production (and Preview if you want).
+Redeploy after changing variables.

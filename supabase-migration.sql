@@ -123,6 +123,13 @@ ALTER TABLE public.pomodoro_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.calendar_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_stats ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_preferences ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_profiles FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.tasks FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.micro_tasks FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.pomodoro_sessions FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.calendar_events FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.user_stats FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.user_preferences FORCE ROW LEVEL SECURITY;
 
 -- Drop existing policies if they exist (for re-running migration)
 DROP POLICY IF EXISTS "Users can view own profile" ON public.user_profiles;
@@ -143,7 +150,7 @@ CREATE POLICY "Users can view own profile" ON public.user_profiles
   FOR SELECT USING (auth.uid() = id);
 
 CREATE POLICY "Users can update own profile" ON public.user_profiles
-  FOR UPDATE USING (auth.uid() = id);
+  FOR UPDATE USING (auth.uid() = id) WITH CHECK (auth.uid() = id);
 
 CREATE POLICY "Users can insert own profile" ON public.user_profiles
   FOR INSERT WITH CHECK (auth.uid() = id);
@@ -155,25 +162,25 @@ CREATE POLICY "Users can insert own tasks" ON public.tasks
   FOR INSERT WITH CHECK (auth.uid() = user_id);
 
 CREATE POLICY "Users can update own tasks" ON public.tasks
-  FOR UPDATE USING (auth.uid() = user_id);
+  FOR UPDATE USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
 CREATE POLICY "Users can delete own tasks" ON public.tasks
   FOR DELETE USING (auth.uid() = user_id);
 
 CREATE POLICY "Users can manage own micro tasks" ON public.micro_tasks
-  FOR ALL USING (auth.uid() = user_id);
+  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
 CREATE POLICY "Users can manage own pomodoro sessions" ON public.pomodoro_sessions
-  FOR ALL USING (auth.uid() = user_id);
+  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
 CREATE POLICY "Users can manage own calendar events" ON public.calendar_events
-  FOR ALL USING (auth.uid() = user_id);
+  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
 CREATE POLICY "Users can manage own stats" ON public.user_stats
-  FOR ALL USING (auth.uid() = user_id);
+  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
 CREATE POLICY "Users can manage own preferences" ON public.user_preferences
-  FOR ALL USING (auth.uid() = user_id);
+  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
 -- Create indexes for better query performance
 CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON public.tasks(user_id);
@@ -193,7 +200,13 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
--- Triggers to auto-update updated_at
+-- Triggers to auto-update updated_at (drop first so re-running this script never errors)
+DROP TRIGGER IF EXISTS update_tasks_updated_at ON public.tasks;
+DROP TRIGGER IF EXISTS update_micro_tasks_updated_at ON public.micro_tasks;
+DROP TRIGGER IF EXISTS update_calendar_events_updated_at ON public.calendar_events;
+DROP TRIGGER IF EXISTS update_user_stats_updated_at ON public.user_stats;
+DROP TRIGGER IF EXISTS update_user_preferences_updated_at ON public.user_preferences;
+
 CREATE TRIGGER update_tasks_updated_at BEFORE UPDATE ON public.tasks
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 

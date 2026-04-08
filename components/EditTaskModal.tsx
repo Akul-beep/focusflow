@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { X } from 'lucide-react';
 import { useStore } from '@/lib/store';
 import { Task } from '@/types';
+import { localDateKey, parseCalendarDate } from '@/lib/local-date';
 
 interface EditTaskModalProps {
   task: Task;
@@ -16,9 +17,7 @@ export default function EditTaskModal({ task, isOpen, onClose }: EditTaskModalPr
   const [formData, setFormData] = useState({
     title: task.title,
     description: task.description || '',
-    dueDate: task.dueDate instanceof Date 
-      ? task.dueDate.toISOString().split('T')[0]
-      : new Date(task.dueDate).toISOString().split('T')[0],
+    dueDate: localDateKey(task.dueDate instanceof Date ? task.dueDate : parseCalendarDate(task.dueDate)),
     priority: task.priority,
     subject: task.subject || '',
   });
@@ -30,7 +29,7 @@ export default function EditTaskModal({ task, isOpen, onClose }: EditTaskModalPr
     updateTask(task.id, {
       title: formData.title,
       description: formData.description || undefined,
-      dueDate: new Date(formData.dueDate),
+      dueDate: parseCalendarDate(formData.dueDate),
       priority: formData.priority,
       subject: formData.subject || undefined,
     });

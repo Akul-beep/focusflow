@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { Loader2, X, Check, HelpCircle, MessageSquareWarning } from 'lucide-react';
+import { SETTINGS_AI_ASSISTANT_HREF } from '@/lib/ai-gemini-key-help';
 import { useStore } from '@/lib/store';
 import { Task, MicroTask, CalendarEvent, SchedulePreferences } from '@/types';
 import { useFeedback } from '@/components/FeedbackProvider';
@@ -31,7 +32,7 @@ type ParsedTaskResponse =
   | {
     success: boolean;
     kind: 'task';
-    /** Groq-first scheduling intent; echoed when the API returns it. */
+    /** Server scheduling intent metadata. */
     scheduleMetadata?: ParsedScheduleMetadata;
     sourceSpan?: string;
     title: string;
@@ -359,7 +360,7 @@ function buildPreviewStudyPlan(
     schedulePreferences,
     slotEarliest != null ? { slotEarliestMinutes: slotEarliest } : undefined
   );
-  let existing = [...baseTasks];
+  const existing = [...baseTasks];
   const built: PreviewPlanTask[] = [];
 
   for (const t of plan.tasks) {
@@ -662,6 +663,12 @@ export default function AITaskInput({ onTaskCreated, variant = 'default' }: AITa
   const [showHelp, setShowHelp] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
+  const clearAiSuggestionState = useCallback(() => {
+    setBatchPreview(null);
+    setPreviewPlan(null);
+    setPreviewTask(null);
+  }, []);
+
   const refreshGeminiHealth = useCallback(() => {
     void fetch('/api/gemini', { credentials: 'same-origin' })
       .then((r) => r.json())
@@ -771,9 +778,7 @@ export default function AITaskInput({ onTaskCreated, variant = 'default' }: AITa
 
     setIsProcessing(true);
     setInput('');
-    setBatchPreview(null);
-    setPreviewPlan(null);
-    setPreviewTask(null);
+    clearAiSuggestionState();
 
     try {
       const rawApi = await parseNaturalLanguage(taskText);
@@ -787,8 +792,8 @@ export default function AITaskInput({ onTaskCreated, variant = 'default' }: AITa
         items = [{ ...full, success: true } as ParsedTaskResponse];
       }
 
-      let shadowTasks = [...tasks];
-      let shadowCal = [...calendarEvents];
+      const shadowTasks = [...tasks];
+      const shadowCal = [...calendarEvents];
       const entries: BatchPreviewEntry[] = [];
 
       for (const parsed of items) {
@@ -889,7 +894,12 @@ export default function AITaskInput({ onTaskCreated, variant = 'default' }: AITa
           continue;
         }
 
-        if (parsed.sessionStyle === 'single_block') {
+        const normalizedSpan = normalizeSchedulingUserText(span).toLowerCase();
+        const explicitSingleSitting = /\b(one\s+sitting|single\s+block|one\s+go|do\s+not\s+break)\b/i.test(normalizedSpan);
+        const longFormWriting = /\b(essay|paper|report|coursework|write[-\s]?up|dissertation)\b/i.test(normalizedSpan);
+        const forceMultiStepPreview = parsed.sessionStyle === 'single_block' && longFormWriting && !explicitSingleSitting;
+
+        if (parsed.sessionStyle === 'single_block' && !forceMultiStepPreview) {
           const textMins = extractDurationMinutesFromUserText(span);
           const mins = Math.max(
             10,
@@ -1096,7 +1106,7 @@ export default function AITaskInput({ onTaskCreated, variant = 'default' }: AITa
       const msg = error instanceof Error ? error.message : 'Something went wrong';
       if (code === 'AI_DAILY_LIMIT') {
         alert(
-          `${msg}\n\nTip: open Settings → AI assistant and paste a free Groq key from console.groq.com — it saves to your account and works on every device you sign in on.`
+          `${msg}\n\nTip: open Settings → AI assistant and add your own Gemini API key (step-by-step guide there) for more usage.`
         );
       } else {
         const lower = msg.toLowerCase();
@@ -1270,7 +1280,7 @@ export default function AITaskInput({ onTaskCreated, variant = 'default' }: AITa
           <button
             type="button"
             onClick={() => {
-              setBatchPreview(null);
+              clearAiSuggestionState();
             }}
             className="p-1 text-[#B0AEA5] hover:text-[#141413] rounded"
           >
@@ -1360,7 +1370,7 @@ export default function AITaskInput({ onTaskCreated, variant = 'default' }: AITa
           <button
             type="button"
             onClick={() => {
-              setPreviewPlan(null);
+              clearAiSuggestionState();
             }}
             className="p-1 text-[#B0AEA5] hover:text-[#141413] rounded"
           >
@@ -1427,7 +1437,7 @@ export default function AITaskInput({ onTaskCreated, variant = 'default' }: AITa
           <span className="text-xs font-heading font-medium text-[#B0AEA5]">AI suggestion</span>
           <button
             onClick={() => {
-              setPreviewTask(null);
+              clearAiSuggestionState();
             }}
             className="p-1 text-[#B0AEA5] hover:text-[#141413] rounded"
           >
@@ -1487,7 +1497,7 @@ export default function AITaskInput({ onTaskCreated, variant = 'default' }: AITa
         <div className="flex gap-2">
           <button
             onClick={() => {
-              setPreviewTask(null);
+              clearAiSuggestionState();
             }}
             className="flex-1 px-3 py-2 text-xs font-heading font-medium border border-[#E8E6DC] rounded-lg text-[#141413] hover:bg-white transition-colors"
           >
@@ -1508,29 +1518,73 @@ export default function AITaskInput({ onTaskCreated, variant = 'default' }: AITa
   return (
     <div>
       {variant === 'nav' ? (
-        <div className="flex justify-end gap-0.5 mb-2">
-          <button
-            type="button"
-            onClick={() => openFeedback({ kind: 'ai_parse', aiPrompt: input })}
-            className="p-1.5 text-[#B0AEA5] hover:text-[#6A9BCC] hover:bg-white/80 rounded-lg transition-colors"
-            title="AI misread this? Send what went wrong (helps us improve)."
-            aria-label="Report AI parse issue"
-          >
-            <MessageSquareWarning className="w-4 h-4" />
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowHelp(!showHelp)}
-            className="p-1.5 text-[#B0AEA5] hover:text-[#D97757] hover:bg-white/80 rounded-lg transition-colors"
-            title="How to use"
-            aria-label="How to use AI task creator"
-          >
-            <HelpCircle className="w-4 h-4" />
-          </button>
+        <div className="mb-2">
+          <div className="flex justify-end gap-0.5">
+            <button
+              type="button"
+              onClick={() => openFeedback({ kind: 'ai_parse', aiPrompt: input })}
+              className="p-1.5 text-[#B0AEA5] hover:text-[#6A9BCC] hover:bg-white/80 rounded-lg transition-colors"
+              title="AI misread this? Send what went wrong (helps us improve)."
+              aria-label="Report AI parse issue"
+            >
+              <MessageSquareWarning className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowHelp(!showHelp)}
+              className="p-1.5 text-[#B0AEA5] hover:text-[#D97757] hover:bg-white/80 rounded-lg transition-colors"
+              title="How to use"
+              aria-label="How to use AI task creator"
+            >
+              <HelpCircle className="w-4 h-4" />
+            </button>
+          </div>
+          {apiConfigured === true && sharedAiMeta && sharedAiMeta.limit > 0 && !sharedAiMeta.byok ? (
+            <div className="mt-1 flex items-center justify-end gap-1.5 text-[10px]">
+              <span className="font-heading font-semibold text-[#141413] tabular-nums">
+                {sharedAiMeta.used}/{sharedAiMeta.limit}
+              </span>
+              <span className="text-[#B0AEA5]">· resets daily</span>
+              <Link
+                href={SETTINGS_AI_ASSISTANT_HREF}
+                className={`font-heading ${sharedAiMeta.used >= sharedAiMeta.limit ? 'font-semibold text-[#D97757]' : 'font-medium text-[#6A9BCC]'} hover:underline`}
+              >
+                {sharedAiMeta.used >= sharedAiMeta.limit ? 'Want more?' : 'Own API key'}
+              </Link>
+            </div>
+          ) : null}
         </div>
       ) : (
-        <div className="flex items-center justify-between gap-2 mb-3">
-          <span className="text-xs font-heading font-medium text-[#B0AEA5] shrink-0">AI Task Creator</span>
+        <div className="flex items-start justify-between gap-2 mb-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="text-xs font-heading font-medium text-[#B0AEA5] shrink-0">AI Task Creator</span>
+                {apiConfigured === true && sharedAiMeta && sharedAiMeta.limit > 0 && !sharedAiMeta.byok ? (
+                  <>
+                    <span className="text-xs font-heading font-semibold text-[#141413] tabular-nums">
+                      {sharedAiMeta.used}/{sharedAiMeta.limit}
+                    </span>
+                    <span className="text-[11px] text-[#B0AEA5]">· resets daily</span>
+                    {sharedAiMeta.used >= sharedAiMeta.limit ? (
+                      <Link
+                        href={SETTINGS_AI_ASSISTANT_HREF}
+                        className="text-[11px] font-heading font-semibold text-[#D97757] hover:underline"
+                      >
+                        Want more?
+                      </Link>
+                    ) : (
+                      <Link
+                        href={SETTINGS_AI_ASSISTANT_HREF}
+                        title="Open Settings → AI assistant"
+                        className="text-[11px] font-heading font-medium text-[#6A9BCC] hover:underline"
+                      >
+                        Add your own API key
+                      </Link>
+                    )}
+                  </>
+                ) : null}
+            </div>
+          </div>
           <div className="flex items-center gap-0.5 shrink-0">
             <button
               type="button"
@@ -1567,28 +1621,6 @@ export default function AITaskInput({ onTaskCreated, variant = 'default' }: AITa
           </p>
         </div>
       )}
-
-      {apiConfigured === true && sharedAiMeta && !sharedAiMeta.byok && sharedAiMeta.limit > 0 ? (
-        <div className="mb-3 p-3 bg-[#FAF9F5] rounded-lg border border-[#E8E6DC]">
-          <p className="text-xs text-[#5C5B56] font-body leading-relaxed">
-            <span className="font-heading font-semibold text-[#141413]">Included AI today: </span>
-            {sharedAiMeta.used} / {sharedAiMeta.limit} (resets daily).{' '}
-            <Link href="/settings" className="text-[#D97757] font-medium hover:underline">
-              Add your Groq key in Settings
-            </Link>{' '}
-            for unlimited smart scheduling on your account.
-          </p>
-        </div>
-      ) : null}
-
-      {apiConfigured === true && sharedAiMeta?.byok ? (
-        <div className="mb-3 p-3 bg-[#E8F4E8]/35 rounded-lg border border-[#E8E6DC]">
-          <p className="text-xs text-[#5C5B56] font-body">
-            <span className="font-heading font-semibold text-[#141413]">Your Groq key is active.</span> Scheduling uses
-            your quota, not the shared daily limit.
-          </p>
-        </div>
-      ) : null}
 
       {showHelp && (
         <div className="mb-3 p-3 bg-white rounded-lg border border-[#E8E6DC] text-xs text-[#141413] space-y-3">

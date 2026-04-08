@@ -28,8 +28,8 @@ import {
 } from '@/lib/parse-schedule-metadata';
 import { buildCompactParseTaskPrompt, buildParseTaskRepairPrompt } from '@/lib/parse-task-groq-prompt';
 import { createSupabaseRouteHandlerClient } from '@/lib/supabase/server';
-import { aiRequestAsyncLocal, getGroqKeyOverrideForRequest } from '@/lib/ai-request-context';
-import { decryptUserGroqKey, isValidGroqKeyFormat } from '@/lib/ai-user-groq-key-crypto';
+import { aiRequestAsyncLocal, getGeminiKeyOverrideForRequest } from '@/lib/ai-request-context';
+import { decryptUserGroqKey, isValidUserGeminiApiKeyFormat } from '@/lib/ai-user-groq-key-crypto';
 import { getAiSharedDailyLimit, utcTodayDateString } from '@/lib/ai-shared-quota';
 import {
   extractDurationMinutesFromUserText,
@@ -50,6 +50,7 @@ import {
   normalizeSchedulingUserText,
   ensureEventWeeklyRepeatFromUserText,
   inferCalendarDayFromUserText,
+  inferOrdinalDeadlineDayFromUserText,
   extractWeekdayIndicesFromUserText,
   userTextIndicatesCalendarEvent,
   userTextIndicatesFlexibleTask,
@@ -879,7 +880,7 @@ function extractBetweenThemesFromText(raw: string): string[] {
 }
 
 function normalizeTitleForSubjectCluster(title: string): string {
-  let t = String(title || '')
+  const t = String(title || '')
     .toLowerCase()
     .replace(/\b(prep|practice|study|revision|revise|session|block|slot)\b/gi, ' ')
     .replace(/\bpaper\s*\d+\b/gi, 'paper')
@@ -1770,28 +1771,16 @@ function buildParseTaskItemResponse(
 }
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
-const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
-const GEMINI_MODEL_NAME = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-const GROQ_MODEL_NAME = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
-/** Empty or `groq` = Groq only when `GROQ_API_KEY` is set. `gemini` = Google Gemini (legacy / opt-in). */
-const AI_PROVIDER = (process.env.AI_PROVIDER || '').trim().toLowerCase(); // "groq" | "gemini" | ""
+const GEMINI_MODEL_NAME = process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite';
 
 const isValidGeminiApiKey = GEMINI_API_KEY &&
   GEMINI_API_KEY.trim() !== '' &&
   !GEMINI_API_KEY.includes('PASTE_YOUR_KEY_HERE') &&
   !GEMINI_API_KEY.includes('your_') &&
   GEMINI_API_KEY.length > 20;
-
-const isValidGroqApiKey = GROQ_API_KEY &&
-  GROQ_API_KEY.trim() !== '' &&
-  GROQ_API_KEY.startsWith('gsk_') &&
-  GROQ_API_KEY.length > 20;
-
-if (!isValidGeminiApiKey && !isValidGroqApiKey) {
-  console.warn('No valid AI API key found. Set GROQ_API_KEY in .env.local (default). Legacy: GEMINI_API_KEY + AI_PROVIDER=gemini.');
+if (!isValidGeminiApiKey) {
+  console.warn('No valid AI API key found. Set GEMINI_API_KEY in .env.local.');
 }
-
-const genAI = isValidGeminiApiKey ? new GoogleGenerativeAI(GEMINI_API_KEY) : null;
 
 type ChunkedMicroTask = {
   title: string;
@@ -2408,35 +2397,71 @@ function formatTopicListFallback(raw: string): string[] {
   );
 }
 
-function getProviderOrder(): Array<'groq' | 'gemini'> {
-  if (AI_PROVIDER === 'gemini') {
-    if (isValidGeminiApiKey && isValidGroqApiKey) return ['gemini', 'groq'];
-    if (isValidGeminiApiKey) return ['gemini'];
-    if (isValidGroqApiKey) return ['groq'];
-    return [];
-  }
-  // Default + AI_PROVIDER=groq or empty: Groq only when configured (avoid unexpected Gemini quota errors).
-  if (isValidGroqApiKey) return ['groq'];
+function getProviderOrder(): Array<'gemini'> {
   if (isValidGeminiApiKey) return ['gemini'];
   return [];
 }
 
-async function generateTextWithGemini(prompt: string): Promise<string> {
-  if (!genAI) throw new Error('Gemini not configured');
-  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL_NAME });
+async function userHasStoredAiCredentialRow(
+  supabase: Awaited<ReturnType<typeof createSupabaseRouteHandlerClient>>,
+  userId: string
+): Promise<boolean> {
+  const { data } = await supabase.from('user_ai_credentials').select('user_id').eq('user_id', userId).maybeSingle();
+  return Boolean(data);
+}
+
+async function loadUserGeminiApiKeyDecrypted(
+  supabase: Awaited<ReturnType<typeof createSupabaseRouteHandlerClient>>,
+  userId: string
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('user_ai_credentials')
+    .select('groq_key_ciphertext')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error || !data?.groq_key_ciphertext) return null;
+  try {
+    const plain = decryptUserGroqKey(data.groq_key_ciphertext);
+    if (!isValidUserGeminiApiKeyFormat(plain)) return null;
+    return plain.trim();
+  } catch {
+    return null;
+  }
+}
+
+async function generateTextWithGemini(
+  prompt: string,
+  options?: { maxCompletionTokens?: number; modelOverride?: string }
+): Promise<string> {
+  const override = getGeminiKeyOverrideForRequest()?.trim();
+  const serverKey = isValidGeminiApiKey ? GEMINI_API_KEY.trim() : '';
+  const apiKey = override || serverKey;
+  if (!apiKey) throw new Error('Gemini not configured');
+  const client = new GoogleGenerativeAI(apiKey);
+  const model = client.getGenerativeModel({
+    model: options?.modelOverride || GEMINI_MODEL_NAME,
+    generationConfig: {
+      temperature: 0.15,
+      responseMimeType: 'application/json',
+      ...(Number.isFinite(options?.maxCompletionTokens)
+        ? {
+            maxOutputTokens: Math.max(128, Math.min(8192, Math.floor(options!.maxCompletionTokens!))),
+          }
+        : {}),
+    },
+  });
   const result = await model.generateContent(prompt);
   const response = await result.response;
   return response.text();
 }
 
-type GroqGenerateOptions = {
+type GenerateOptions = {
   /**
    * Groq on-demand TPM often budgets roughly `prompt + max_tokens`.
    * Keep low for parseTask; raise only for actions that need long JSON.
    */
   maxCompletionTokens?: number;
   modelOverride?: string;
-  disableModelFallbacks?: boolean;
 };
 
 function getGroqModelFallbacks(): string[] {
@@ -2459,7 +2484,7 @@ const AI_QUEUE_TIMEOUT_MS = Math.max(
 const AI_WINDOW_MS = 60_000;
 const AI_MAX_REQ_PER_WINDOW = Math.max(
   5,
-  Math.min(600, Number(process.env.AI_MAX_REQ_PER_MINUTE_PER_IP) || 40)
+  Math.min(600, Number(process.env.AI_MAX_REQ_PER_MINUTE_PER_IP) || 15)
 );
 let aiInFlight = 0;
 const aiWaiters: Array<() => void> = [];
@@ -2516,95 +2541,25 @@ function releaseAiSlot(): void {
   if (next) next();
 }
 
-async function generateTextWithGroq(prompt: string, options?: GroqGenerateOptions): Promise<string> {
-  const fromCtx = getGroqKeyOverrideForRequest()?.trim();
-  const apiKey = (fromCtx || GROQ_API_KEY || '').trim();
-  if (!apiKey.startsWith('gsk_') || apiKey.length < 20) {
-    throw new Error('Groq not configured');
-  }
-  const envCap = Number(process.env.GROQ_MAX_OUTPUT_TOKENS);
-  const defaultCap = Number.isFinite(envCap) && envCap >= 256 && envCap <= 8192 ? Math.floor(envCap) : 4096;
-  const max_tokens = Math.min(8192, Math.max(256, options?.maxCompletionTokens ?? defaultCap));
-  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: options?.modelOverride || GROQ_MODEL_NAME,
-      temperature: 0.2,
-      max_tokens,
-      messages: [
-        {
-          role: 'system',
-          content:
-            'JSON-only when asked: no markdown fences. Match field names in the user message. Include scheduleMetadata on each schedule object when required. Use the student local calendar for dates/times—not UTC.',
-        },
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ],
-    }),
-  });
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`Groq API error: ${res.status} ${errText}`);
-  }
-  const data = (await res.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
-  };
-  const text = data.choices?.[0]?.message?.content;
-  if (!text) throw new Error('Groq API returned empty response');
-  return text;
-}
-
-async function generateTextWithGroqModelFallbacks(
-  prompt: string,
-  options?: GroqGenerateOptions
-): Promise<string> {
-  const byokActive = Boolean(getGroqKeyOverrideForRequest()?.trim());
-  if (options?.disableModelFallbacks || byokActive) {
-    return generateTextWithGroq(prompt, options);
-  }
-  const primary = options?.modelOverride?.trim() || GROQ_MODEL_NAME;
-  const models = [primary, ...getGroqModelFallbacks()].filter(Boolean);
-  const errs: string[] = [];
-  for (const model of models) {
-    try {
-      return await generateTextWithGroq(prompt, { ...options, modelOverride: model });
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      errs.push(`${model}: ${msg}`);
-      // continue trying next model
-    }
-  }
-  throw new Error(`Groq model fallback exhausted. ${errs.join(' | ')}`);
-}
-
-async function generateText(prompt: string, options?: GroqGenerateOptions): Promise<string> {
+async function generateText(prompt: string, options?: GenerateOptions): Promise<string> {
   const maxAttempts = 3;
   let attempt = 0;
   let lastErr = 'No AI provider available';
+  const canCallGemini =
+    getProviderOrder().length > 0 || Boolean(getGeminiKeyOverrideForRequest()?.trim());
   while (attempt < maxAttempts) {
     attempt += 1;
-    const providers = getGroqKeyOverrideForRequest()?.trim() ? (['groq'] as const) : getProviderOrder();
-    const errors: string[] = [];
-    for (const p of providers) {
-      try {
-        if (p === 'groq') return await generateTextWithGroqModelFallbacks(prompt, options);
-        return await generateTextWithGemini(prompt);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        errors.push(`${p}: ${msg}`);
-        lastErr = msg;
-      }
+    if (!canCallGemini) break;
+    try {
+      return await generateTextWithGemini(prompt, options);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      lastErr = msg;
+      const retryable = /429|rate limit|quota|Too Many Requests|retry/i.test(msg);
+      if (!retryable || attempt >= maxAttempts) break;
+      const waitMs = 500 * Math.pow(2, attempt - 1);
+      await new Promise((r) => setTimeout(r, waitMs));
     }
-    const retryable = /429|rate limit|quota|Too Many Requests|retry/i.test(lastErr);
-    if (!retryable || attempt >= maxAttempts) break;
-    const waitMs = 500 * Math.pow(2, attempt - 1);
-    await new Promise((r) => setTimeout(r, waitMs));
   }
   throw new Error(`No AI provider available. ${lastErr}`);
 }
@@ -2636,81 +2591,84 @@ function isProviderRateLimitErrorMessage(message: string): boolean {
 type AiRouteAuthContext = {
   supabase: Awaited<ReturnType<typeof createSupabaseRouteHandlerClient>>;
   userId: string | null;
-  groqApiKeyOverride: string | undefined;
   canRunAi: boolean;
   shouldChargeSharedQuota: boolean;
+  /** Decrypted Gemini key for this user (POST only); null if none or invalid. */
+  userGeminiApiKey: string | null;
+  /** True if a row exists in user_ai_credentials (BYOK UI / health). */
+  hasStoredUserGeminiCredential: boolean;
 };
 
-async function loadAiRouteAuthContext(): Promise<AiRouteAuthContext> {
+async function loadAiRouteAuthContext(mode: 'get' | 'post'): Promise<AiRouteAuthContext> {
   const supabase = await createSupabaseRouteHandlerClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
+  const userId = user?.id ?? null;
+  const serverKeyOk = getProviderOrder().length > 0;
 
-  let byokGroqKey: string | undefined;
-  if (user) {
-    const { data: row } = await supabase
-      .from('user_ai_credentials')
-      .select('groq_key_ciphertext')
-      .eq('user_id', user.id)
-      .maybeSingle();
-    const blob = row?.groq_key_ciphertext;
-    if (typeof blob === 'string' && blob.length > 0) {
-      try {
-        const k = decryptUserGroqKey(blob).trim();
-        if (isValidGroqKeyFormat(k)) byokGroqKey = k;
-      } catch {
-        /* bad ciphertext or missing AI_USER_KEY_ENCRYPTION_SECRET */
-      }
+  let hasStoredUserGeminiCredential = false;
+  let userGeminiApiKey: string | null = null;
+  if (userId) {
+    hasStoredUserGeminiCredential = await userHasStoredAiCredentialRow(supabase, userId);
+    if (mode === 'post') {
+      userGeminiApiKey = await loadUserGeminiApiKeyDecrypted(supabase, userId);
     }
   }
 
-  const userHasValidByok = Boolean(byokGroqKey);
-  const canRunAi = userHasValidByok || getProviderOrder().length > 0;
-  const limit = getAiSharedDailyLimit();
-  // Launch mode: shared-cap enforcement is temporarily disabled.
-  const shouldChargeSharedQuota = false;
+  const canRunAi =
+    serverKeyOk || (mode === 'get' ? hasStoredUserGeminiCredential : Boolean(userGeminiApiKey));
+  const shouldChargeSharedQuota =
+    mode === 'post' && Boolean(userId) && serverKeyOk && !userGeminiApiKey;
 
   return {
     supabase,
-    userId: user?.id ?? null,
-    groqApiKeyOverride: byokGroqKey,
+    userId,
     canRunAi,
     shouldChargeSharedQuota,
+    userGeminiApiKey,
+    hasStoredUserGeminiCredential,
   };
 }
 
 export async function GET() {
-  const ctx = await loadAiRouteAuthContext();
+  const ctx = await loadAiRouteAuthContext('get');
   const providerOrder = getProviderOrder();
   const primary = providerOrder[0];
   const configured = ctx.canRunAi;
 
   let sharedAi: { limit: number; used: number; byok: boolean } | null = null;
   if (ctx.userId) {
-    const today = utcTodayDateString();
-    const { data: usage } = await ctx.supabase
-      .from('ai_usage_daily')
-      .select('shared_ai_calls')
-      .eq('user_id', ctx.userId)
-      .eq('usage_date', today)
-      .maybeSingle();
+    if (ctx.hasStoredUserGeminiCredential) {
+      sharedAi = {
+        limit: 0,
+        used: 0,
+        byok: true,
+      };
+    } else {
+      const today = utcTodayDateString();
+      const { data: usage } = await ctx.supabase
+        .from('ai_usage_daily')
+        .select('shared_ai_calls')
+        .eq('user_id', ctx.userId)
+        .eq('usage_date', today)
+        .maybeSingle();
+      sharedAi = {
+        limit: getAiSharedDailyLimit(),
+        used: Number(usage?.shared_ai_calls) || 0,
+        byok: false,
+      };
+    }
+  } else {
     sharedAi = {
       limit: getAiSharedDailyLimit(),
-      used: Number(usage?.shared_ai_calls) || 0,
-      byok: Boolean(ctx.groqApiKeyOverride),
+      used: 0,
+      byok: false,
     };
   }
 
-  const providerLabel =
-    ctx.groqApiKeyOverride ? 'groq' : primary === 'groq' ? 'groq' : primary === 'gemini' ? 'gemini' : 'none';
-  const modelLabel = ctx.groqApiKeyOverride
-    ? GROQ_MODEL_NAME
-    : primary === 'groq'
-      ? GROQ_MODEL_NAME
-      : primary === 'gemini'
-        ? GEMINI_MODEL_NAME
-        : null;
+  const providerLabel = primary === 'gemini' ? 'gemini' : 'none';
+  const modelLabel = primary === 'gemini' ? GEMINI_MODEL_NAME : null;
 
   return NextResponse.json({
     configured,
@@ -2718,7 +2676,7 @@ export async function GET() {
     model: modelLabel,
     message: configured
       ? undefined
-      : 'The AI assistant is not enabled on this server. If you run your own copy, add GROQ_API_KEY (or Gemini keys—see project README) to your environment and restart.',
+      : 'The AI assistant is not enabled on this server. Add GEMINI_API_KEY to your environment and restart.',
     sharedAi,
   });
 }
@@ -2742,13 +2700,33 @@ function safeParseModelDate(raw: unknown, fallback: Date): Date {
  */
 function extractSessionCountFromUserText(text: string): number | null {
   const t = text.toLowerCase().trim();
+  const numberWords: Record<string, number> = {
+    a: 1,
+    an: 1,
+    one: 1,
+    two: 2,
+    three: 3,
+    four: 4,
+    five: 5,
+    six: 6,
+    seven: 7,
+    eight: 8,
+    nine: 9,
+    ten: 10,
+    eleven: 11,
+    twelve: 12,
+    dozen: 12,
+    couple: 2,
+  };
   // Match patterns like: "8 papers", "do 5 mock exams", "complete 3 chapters"
   // Also "3x practice", "10 sets of exercises"
   const patterns = [
-    /\b(\d{1,3})\s*(?:past\s+)?(?:papers?|exams?|mocks?|tests?|quizzes?|exercises?|problems?|questions?|sets?|worksheets?|chapters?|sections?|items?|sessions?|pieces?|tasks?|assignments?|essays?|drills?|rounds?|attempts?|practice\s+(?:papers?|tests?|sets?|exams?))\b/i,
+    /\b(\d{1,3})\s+(?:[\w-]+\s+){0,3}(?:past\s+)?(?:papers?|exams?|mocks?|tests?|quizzes?|exercises?|problems?|questions?|sets?|worksheets?|chapters?|sections?|items?|sessions?|pieces?|tasks?|assignments?|essays?|drills?|rounds?|attempts?|practice\s+(?:papers?|tests?|sets?|exams?))\b/i,
     /\b(?:do|complete|finish|solve|attempt|practice|revise|review|work\s+(?:through|on))\s+(\d{1,3})\b/i,
     /\b(\d{1,3})\s*x\s*(?:practice|mock|paper|test|drill)\b/i,
+    /\b(\d{1,3})\s*q(?:uestions?)?\b/i,
     /\bhave\s+(\d{1,3})\s+(?:to\s+(?:do|complete|finish))?\b/i,
+    /\b(\d{1,3})\s+of\s+them\b/i,
   ];
   for (const pat of patterns) {
     const m = t.match(pat);
@@ -2756,6 +2734,85 @@ function extractSessionCountFromUserText(text: string): number | null {
       const n = Math.round(Number(m[1]));
       if (Number.isFinite(n) && n >= 2 && n <= 200) return n;
     }
+  }
+  const wordMatch = t.match(
+    /\b(a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|dozen|couple)\b\s+(?:of\s+)?(?:past\s+)?(?:papers?|exams?|mocks?|tests?|quizzes?|exercises?|problems?|questions?|sets?|worksheets?|chapters?|sections?|items?|sessions?|pieces?|tasks?|assignments?|essays?|drills?|rounds?|attempts?)\b/i
+  );
+  if (wordMatch) {
+    const n = numberWords[wordMatch[1]!.toLowerCase()];
+    if (Number.isFinite(n) && n >= 2 && n <= 200) return n;
+  }
+  return null;
+}
+
+function extractQuestionCountFromUserText(text: string): number | null {
+  const t = normalizeSchedulingUserText(text).toLowerCase();
+  const m = t.match(/\b(\d{1,4})\s*q(?:uestions?)?\b/i) ?? t.match(/\b(\d{1,4})\s+questions?\b/i);
+  if (!m) return null;
+  const n = Math.round(Number(m[1]));
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.min(500, n);
+}
+
+function inferSessionCountForQuestionWorkload(questionCount: number, minutesPerSession: number): number {
+  // Rough pacing target: around 4 minutes/question by default.
+  const qPerSession = Math.max(6, Math.min(20, Math.round(minutesPerSession / 4)));
+  return Math.max(1, Math.ceil(questionCount / qPerSession));
+}
+
+function professionalizeStudyPlanTitle(input: string): string {
+  const s = normalizeSchedulingUserText(input)
+    .replace(/\b(?:i\s+got|i\s+have|i\s+need|please|kinda|like|you\s+know|idk|have\s+to|gotta|wanna)\b/gi, ' ')
+    .replace(/\b(?:for\s+like|and\s+like|they\s+are|they\s+re|ill|i'?ll)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!s) return 'Study plan';
+  const clipped = s.slice(0, 72).replace(/[,.]\s*$/, '');
+  return clipped.charAt(0).toUpperCase() + clipped.slice(1);
+}
+
+function toProfessionalTitle(input: string): string {
+  const raw = String(input || '').trim().replace(/\s+/g, ' ');
+  if (!raw) return raw;
+  const words = raw.split(' ');
+  const small = new Set(['and', 'or', 'for', 'to', 'of', 'on', 'in', 'at', 'by', 'the', 'a', 'an']);
+  return words
+    .map((w, i) => {
+      const low = w.toLowerCase();
+      if (i > 0 && small.has(low)) return low;
+      return low.charAt(0).toUpperCase() + low.slice(1);
+    })
+    .join(' ')
+    .replace(/\bi\b/g, 'I');
+}
+
+function inferCanonicalWorkTitleFromUserText(userText: string): string | null {
+  const t = normalizeSchedulingUserText(userText).toLowerCase();
+  const subjectWord = t.match(
+    /\b(math|maths|english|physics|chem|chemistry|biology|bio|history|geography|econ|economics|business|french|spanish|german|mandarin|lit|literature|cs|computer\s+science)\b/
+  )?.[1];
+  const normalizeSubject = (s: string): string => {
+    const m: Record<string, string> = {
+      maths: 'Math',
+      math: 'Math',
+      chem: 'Chemistry',
+      bio: 'Biology',
+      lit: 'Literature',
+      econ: 'Economics',
+      cs: 'Computer Science',
+    };
+    const k = s.trim().toLowerCase();
+    return m[k] ?? (k.charAt(0).toUpperCase() + k.slice(1));
+  };
+  const subj = subjectWord ? normalizeSubject(subjectWord) : '';
+  if (/\b(past\s+papers?|practice\s+papers?|question\s+papers?|timed\s+papers?)\b/.test(t)) {
+    return subj ? `${subj} Practice Paper` : 'Practice Paper';
+  }
+  if (/\bpaper\b/.test(t)) {
+    return subj ? `${subj} Paper` : 'Paper';
+  }
+  if (/\b(essay|essays)\b/.test(t)) {
+    return subj ? `${subj} Essay` : 'Essay';
   }
   return null;
 }
@@ -2833,6 +2890,26 @@ function extractSubjectsFromUserText(text: string): string[] {
     if (subs.length >= 2) return subs;
   }
 
+  // Pattern 5: "study math on one day, next day physics"
+  m = t.match(
+    /\b(?:study|do|revise|practice)\s+([a-z][a-z0-9\s]{1,30}?)\s+(?:on\s+)?one\s+day[,;\s]+(?:the\s+)?next\s+day\s+([a-z][a-z0-9\s]{1,30}?)(?:\b|[,.;])/i
+  );
+  if (m) {
+    const a = m[1]!.trim();
+    const b = m[2]!.trim();
+    if (a && b) return [resolveTitleFromUserText(a, null), resolveTitleFromUserText(b, null)];
+  }
+
+  // Pattern 6: "one day physics, next day chem"
+  m = t.match(
+    /\bone\s+day\s+([a-z][a-z0-9\s]{1,30}?)[,;\s]+(?:the\s+)?next\s+day\s+([a-z][a-z0-9\s]{1,30}?)(?:\b|[,.;])/i
+  );
+  if (m) {
+    const a = m[1]!.trim();
+    const b = m[2]!.trim();
+    if (a && b) return [resolveTitleFromUserText(a, null), resolveTitleFromUserText(b, null)];
+  }
+
   return [];
 }
 
@@ -2849,7 +2926,33 @@ function userTextIndicatesStudyPlan(text: string): boolean {
   if (/\b(?:prep|practice|revision|review|study)\s+(?:daily|every\s+day|each\s+day|till|until|for\s+\d)\b/.test(t)) return true;
   if (/\b(?:till|until|by)\s+(?:the\s+)?\d/.test(t) && /\bprep\b/.test(t)) return true;
   if (/\bfor\s+\d+\s+(?:days?|weeks?)\b/.test(t) && /\b(?:prep|practice|revision|review|study)\b/.test(t)) return true;
+  if (
+    /\b(?:past\s+papers?|practice\s+papers?|mock\s+exams?|question\s+papers?|timed\s+papers?)\b/.test(t) &&
+    /\b(?:by|before|until|till|deadline|due)\b/.test(t)
+  )
+    return true;
   return false;
+}
+
+function extractTopicListFromUserText(text: string): string[] {
+  const raw = normalizeSchedulingUserText(text).trim();
+  if (!raw) return [];
+  const m = raw.match(
+    /\b(?:topics?|topic\s+list|for\s+topics?|including)\s*[:\-]\s*([a-z0-9 ,/&+()'".-]{6,220})$/i
+  );
+  if (!m) return [];
+  const block = m[1]!;
+  const parts = block
+    .split(/,|\band\b|&|\+/i)
+    .map((s) => s.trim().replace(/^[\-\u2022*]\s*/, ''))
+    .filter((s) => s.length >= 2 && s.length <= 60);
+  const uniq: string[] = [];
+  for (const p of parts) {
+    const v = p.charAt(0).toUpperCase() + p.slice(1);
+    if (!uniq.some((u) => u.toLowerCase() === v.toLowerCase())) uniq.push(v);
+    if (uniq.length >= 12) break;
+  }
+  return uniq;
 }
 
 function hasExplicitWeeklyNamedCadence(text: string): boolean {
@@ -2982,6 +3085,11 @@ function generateMicroTasksForPlan(args: {
       // Distribute N sessions evenly across the available candidate dates
       if (candidateDates.length === sessionCount) {
         sessionDates = candidateDates;
+      } else if (sessionCount === 1) {
+        sessionDates = [candidateDates[0]!];
+      } else if (sessionCount <= 4) {
+        // For small workloads, front-load earliest dates instead of spreading too far out.
+        sessionDates = candidateDates.slice(0, sessionCount);
       } else {
         // Pick N dates evenly spaced across the available pool
         sessionDates = [];
@@ -3116,7 +3224,7 @@ function buildResponseFromLLMExtract(
       kind = 'event';
     }
   }
-  const titleRaw = String(p.title || '').trim();
+  const titleRaw = String(p.title ?? p.task ?? p.name ?? '').trim();
   const title = resolveTitleFromUserText(userText, titleRaw || null);
 
   // ── EVENT ──────────────────────────────────────────────────
@@ -3217,16 +3325,35 @@ function buildResponseFromLLMExtract(
     const inferredDate = inferCalendarDayFromUserText(userText, nowLocal);
     const finalDue = inferredDate && inferredDate >= todayLocal ? inferredDate : dueDate;
 
-    const totalMinutes = Math.max(15, Math.min(8 * 60, Math.round(Number(p.totalMinutes)) || 60));
+    const estHoursRaw = Number(p.estimatedHours);
+    const minutesFromEstimatedHours =
+      Number.isFinite(estHoursRaw) && estHoursRaw > 0 ? Math.round(estHoursRaw * 60) : null;
+    const totalMinutes = Math.max(
+      15,
+      Math.min(8 * 60, Math.round(Number(p.totalMinutes)) || minutesFromEstimatedHours || 60)
+    );
     const textMins = extractDurationMinutesFromUserText(userText);
     const effectiveMinutes = textMins ?? totalMinutes;
-    const singleSession = p.singleSession === true;
+    const modelSingle =
+      p.singleSession === true ||
+      String(p.sessionStyle || '')
+        .trim()
+        .toLowerCase() === 'single_block';
+    const essayLike = /\b(essay|report|coursework|dissertation|paper|write-up)\b/i.test(
+      normalizeSchedulingUserText(userText)
+    );
+    // Long writing tasks should not default to a single 4h+ block unless the user explicitly asks for one sitting.
+    const explicitOneSitting = /\b(one\s+sitting|single\s+block|one\s+go|do\s+not\s+break)\b/i.test(
+      normalizeSchedulingUserText(userText)
+    );
+    const singleSession =
+      explicitOneSitting || (modelSingle && !(essayLike && !textMins));
 
     return {
       success: true,
       kind: 'task',
       sourceSpan: userText,
-      title,
+      title: toProfessionalTitle(title),
       description: typeof p.description === 'string' ? p.description : null,
       dueDate: toLocalYYYYMMDD(finalDue),
       priority: p.priority === 'high' || p.priority === 'low' ? String(p.priority) : 'medium',
@@ -3239,15 +3366,33 @@ function buildResponseFromLLMExtract(
 
   // ── STUDY PLAN ─────────────────────────────────────────────
   if (kind === 'study_plan') {
-    const subjects = Array.isArray(p.subjects)
+    const llmSubjects = Array.isArray(p.subjects)
       ? (p.subjects as string[]).map(s => String(s).trim()).filter(s => s.length > 0 && s.length < 80).slice(0, 8)
       : [];
+    const llmSubjectAlias = Array.isArray(p.subject)
+      ? (p.subject as unknown[]).map((s) => String(s).trim()).filter((s) => s.length > 0 && s.length < 80).slice(0, 8)
+      : typeof p.subject === 'string' && p.subject.trim()
+        ? [String(p.subject).trim()]
+        : [];
+    const textSubjects = extractSubjectsFromUserText(userText);
+    const textTopics = extractTopicListFromUserText(userText);
+    const subjects =
+      llmSubjects.length > 0
+        ? llmSubjects
+        : llmSubjectAlias.length > 0
+          ? llmSubjectAlias
+          : textSubjects.length > 0
+            ? textSubjects
+            : textTopics;
     const cadence = String(p.cadence || 'daily').trim();
     const daysOfWeek = Array.isArray(p.daysOfWeek)
       ? (p.daysOfWeek as number[]).filter(d => d >= 0 && d <= 6)
       : null;
-    const rawDeadline = safeParseModelDate(p.deadline, addDays(todayLocal, 14));
-    const deadline = rawDeadline < todayLocal ? addDays(todayLocal, 14) : rawDeadline;
+    const rawDeadline = safeParseModelDate(p.deadline ?? p.dueDate, addDays(todayLocal, 14));
+    const inferredOrdinalDeadline = inferOrdinalDeadlineDayFromUserText(userText, nowLocal);
+    const inferredCalendarDeadline = inferCalendarDayFromUserText(userText, nowLocal);
+    const deadlineCandidate = inferredOrdinalDeadline ?? inferredCalendarDeadline ?? rawDeadline;
+    const deadline = deadlineCandidate < todayLocal ? addDays(todayLocal, 14) : deadlineCandidate;
 
     const rawMins = Number(p.minutesPerSession);
     const textMins = extractDurationMinutesFromUserText(userText);
@@ -3267,7 +3412,40 @@ function buildResponseFromLLMExtract(
     const rawCount = Number(p.sessionCount);
     const llmSessionCount = Number.isFinite(rawCount) && rawCount > 0 ? Math.round(rawCount) : null;
     const textSessionCount = extractSessionCountFromUserText(userText);
-    const sessionCount = llmSessionCount ?? textSessionCount;
+    let sessionCount =
+      llmSessionCount != null && textSessionCount != null
+        ? Math.max(llmSessionCount, textSessionCount)
+        : llmSessionCount ?? textSessionCount;
+    const questionCount = extractQuestionCountFromUserText(userText);
+    if (
+      questionCount != null &&
+      sessionCount != null &&
+      sessionCount >= questionCount &&
+      !/\b(each|per)\s+question\b/i.test(normalizeSchedulingUserText(userText))
+    ) {
+      sessionCount = inferSessionCountForQuestionWorkload(questionCount, minutesPerSession);
+    }
+    const textLower = normalizeSchedulingUserText(userText).toLowerCase();
+    const inferredCanonical = inferCanonicalWorkTitleFromUserText(userText);
+    const canonicalSingular = inferredCanonical
+      ? inferredCanonical
+      : /paper/.test(textLower)
+        ? 'Practice Paper'
+        : /essay/.test(textLower)
+          ? 'Essay Session'
+          : 'Study Session';
+    const subjectLead = subjects.length > 0 ? subjects[0] : (typeof p.subject === 'string' ? String(p.subject).trim() : '');
+    const cleanLead = subjectLead ? professionalizeStudyPlanTitle(subjectLead) : '';
+    const microTaskSeedTitle = inferredCanonical
+      ? inferredCanonical
+      : cleanLead
+        ? `${cleanLead} ${canonicalSingular}`
+        : professionalizeStudyPlanTitle(title || canonicalSingular);
+
+    const planStart =
+      !/\btoday\b/i.test(normalizeSchedulingUserText(userText)) && nowLocal.getHours() >= 19
+        ? addDays(todayLocal, 1)
+        : todayLocal;
 
     // Generate micro-tasks deterministically
     const microTasks = generateMicroTasksForPlan({
@@ -3276,12 +3454,12 @@ function buildResponseFromLLMExtract(
       daysOfWeek,
       repeatInterval,
       deadline,
-      today: todayLocal,
+      today: planStart,
       minutesPerSession,
       sessionCount,
       totalDays,
       sessionsPerDay,
-      title,
+      title: microTaskSeedTitle,
     });
 
     if (microTasks.length === 0) {
@@ -3301,26 +3479,52 @@ function buildResponseFromLLMExtract(
       };
     }
 
-    const totalMins = microTasks.reduce((a, m) => a + m.estimatedMinutes, 0);
-    const planTitle = subjects.length > 1
-      ? subjects.join(' & ') + ' prep'
-      : title;
+    const microTasksLabeled =
+      questionCount != null && microTasks.length > 0
+        ? (() => {
+            const per = Math.max(1, Math.floor(questionCount / microTasks.length));
+            let startQ = 1;
+            return microTasks.map((m, idx) => {
+              const remaining = questionCount - startQ + 1;
+              const take = idx === microTasks.length - 1 ? remaining : Math.min(per, remaining);
+              const endQ = Math.max(startQ, startQ + take - 1);
+              const labelBase = (subjects[0] ? `${subjects[0]} ` : '') + 'Questions';
+              const out = {
+                ...m,
+                title:
+                  startQ === endQ
+                    ? `${labelBase}: Q${startQ}`
+                    : `${labelBase}: Q${startQ}-${endQ}`,
+              };
+              startQ = endQ + 1;
+              return out;
+            });
+          })()
+        : microTasks;
+
+    const totalMins = microTasksLabeled.reduce((a, m) => a + m.estimatedMinutes, 0);
+    const baseTitle = microTaskSeedTitle;
+    const alternatingTitle =
+      subjects.length > 1 ? `Alternating ${subjects.join(' / ')} Prep` : null;
+    const titleSeed = alternatingTitle ?? baseTitle;
+    const planTitle =
+      sessionCount && sessionCount > 1 ? `${titleSeed} Plan (${sessionCount} Sessions)` : titleSeed;
 
     return {
       success: true,
       kind: 'study_plan',
       sourceSpan: userText,
-      summary: planTitle,
+      summary: toProfessionalTitle(planTitle),
       schedulePattern: cadence === 'rotate_daily' ? 'custom_cycle' : cadence === 'daily' ? 'daily' : 'unspecified',
       patternCycleLength: subjects.length > 1 ? subjects.length : null,
       ...(subjects.length > 1 ? { rotationSubjects: subjects } : {}),
       tasks: [{
-        title: planTitle,
+        title: toProfessionalTitle(planTitle),
         description: typeof p.description === 'string' ? p.description : null,
         subject: subjects.length === 1 ? subjects[0] : null,
         dueDate: toLocalYYYYMMDD(deadline),
         priority: 'medium',
-        microTasks,
+        microTasks: microTasksLabeled.map((m) => ({ ...m, title: toProfessionalTitle(m.title) })),
         estimatedTotalMinutes: totalMins,
       }],
     };
@@ -3349,7 +3553,9 @@ function buildFallbackFromUserText(
   todayLocal: Date,
   nowLocal: Date
 ): Record<string, unknown> {
-  const title = resolveTitleFromUserText(userText, null) || userText.trim().slice(0, 200) || 'Study session';
+  const title = toProfessionalTitle(
+    resolveTitleFromUserText(userText, null) || userText.trim().slice(0, 200) || 'Study session'
+  );
   const cal = userTextIndicatesCalendarEvent(userText);
   const flex = userTextIndicatesFlexibleTask(userText);
 
@@ -3357,7 +3563,7 @@ function buildFallbackFromUserText(
     const dayGuess = inferCalendarDayFromUserText(userText, nowLocal) ?? todayLocal;
     const times = extractEventTimeRangeFromUserText(userText);
     const dm = extractDurationMinutesFromUserText(userText);
-    const days = sanitizeWeeklyRepeatDaysFromUserText(userText, []);
+    const days = extractEventRepeatDaysFromUserText(userText, []);
     const wantsRepeat = userAskedForWeeklyRecurrence(userText) && days.length > 0;
     return {
       success: true,
@@ -3421,8 +3627,23 @@ function normalizeLLMParseTaskItem(
     const upgraded = buildResponseFromLLMExtract({ ...raw }, 'study_plan', userText, todayLocal, nowLocal);
     if (upgraded) return upgraded;
   }
+  if (kind === 'task') {
+    const rawCount = Number(raw.sessionCount);
+    const textCount = extractSessionCountFromUserText(userText);
+    const hasRepeatedWorkload = textCount != null && textCount > 1;
+    if (hasRepeatedWorkload && !(userAskedForWeeklyRecurrence(userText) && hasExplicitWeeklyNamedCadence(userText))) {
+      const upgraded = buildResponseFromLLMExtract({ ...raw }, 'study_plan', userText, todayLocal, nowLocal);
+      if (upgraded) return upgraded;
+    }
+  }
+  if (kind === 'study_plan') {
+    // Always pass study plans through deterministic builder so alternating-day intent
+    // produces one rotating track (not parallel duplicated subject tracks).
+    const normalizedPlan = buildResponseFromLLMExtract({ ...raw }, 'study_plan', userText, todayLocal, nowLocal);
+    if (normalizedPlan) return normalizedPlan;
+  }
   const title =
-    String(raw.title || raw.name || '').trim() ||
+    String(raw.title || raw.task || raw.name || '').trim() ||
     resolveTitleFromUserText(userText, null);
 
   if (kind === 'event') {
@@ -3438,11 +3659,17 @@ function normalizeLLMParseTaskItem(
     const startTime =
       typeof raw.startTime === 'string' && raw.startTime.trim()
         ? raw.startTime.trim()
+        : typeof raw.start_time === 'string' && String(raw.start_time).trim()
+          ? String(raw.start_time).trim()
         : typeof raw.time === 'string' && raw.time.trim()
           ? raw.time.trim()
           : inferredTimes?.startHHMM ?? null;
     const endTime =
-      typeof raw.endTime === 'string' && raw.endTime.trim() ? raw.endTime.trim() : inferredTimes?.endHHMM ?? null;
+      typeof raw.endTime === 'string' && raw.endTime.trim()
+        ? raw.endTime.trim()
+        : typeof raw.end_time === 'string' && String(raw.end_time).trim()
+          ? String(raw.end_time).trim()
+          : inferredTimes?.endHHMM ?? null;
     const repeatRaw = raw.repeat as Record<string, unknown> | null | undefined;
     let repeat: { frequency: string; interval: number; daysOfWeek: number[] } | null = null;
     const weekdayNameToIndex = (v: unknown): number | null => {
@@ -3501,7 +3728,7 @@ function normalizeLLMParseTaskItem(
       success: true,
       kind: 'event',
       sourceSpan: userText,
-      title,
+      title: toProfessionalTitle(title),
       description: typeof raw.description === 'string' ? raw.description : null,
       startDate: toLocalYYYYMMDD(resolvedStart < todayLocal && !repeat ? todayLocal : resolvedStart),
       startTime,
@@ -3529,7 +3756,7 @@ function normalizeLLMParseTaskItem(
       success: true,
       kind: 'task',
       sourceSpan: userText,
-      title,
+      title: toProfessionalTitle(title),
       description: typeof raw.description === 'string' ? raw.description : null,
       dueDate: toLocalYYYYMMDD(dueDate < todayLocal ? todayLocal : dueDate),
       priority: raw.priority === 'high' || raw.priority === 'low' ? raw.priority : 'medium',
@@ -3602,13 +3829,13 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { action, ...data } = body;
 
-    const authCtx = await loadAiRouteAuthContext();
+    const authCtx = await loadAiRouteAuthContext('post');
     if (!authCtx.canRunAi) {
       return NextResponse.json(
         {
           error: 'AI provider key not configured',
           message:
-            'AI is not enabled for this request. The server needs GROQ_API_KEY (or Gemini), or sign in and add your own Groq key in Settings.',
+            'AI is not enabled for this request. Add GEMINI_API_KEY on the server, or sign in and save your Gemini API key under Settings → AI assistant.',
         },
         { status: 500 }
       );
@@ -3657,7 +3884,7 @@ export async function POST(request: NextRequest) {
               limit,
               used: Number.isFinite(used) ? used : limit,
               message:
-                'You have used today’s included AI turns for your account. Add your own free Groq API key in Settings to keep full quality, or try again tomorrow.',
+                'You have used today’s included AI turns for your account. Open Settings → AI assistant to add your own Gemini API key (same key on every device you sign in with), or try again tomorrow.',
             },
             { status: 429 }
           );
@@ -3668,7 +3895,9 @@ export async function POST(request: NextRequest) {
     }
 
     return await aiRequestAsyncLocal.run(
-      { groqApiKeyOverride: authCtx.groqApiKeyOverride },
+      {
+        geminiApiKeyOverride: authCtx.userGeminiApiKey || undefined,
+      },
       async () => {
     if (action === 'chunkTask') {
       const { title, description, estimatedHours, dueDate, priority, studyPace, defaultSessionMinutes, gradeLevel } = data;
@@ -3817,15 +4046,10 @@ Return ONLY a JSON array (no markdown): [{"title","description","estimatedMinute
         nowHHMM: toLocalHHMM(nowLocal),
       });
 
-      // Let the model output full scheduling JSON; server only validates/normalizes
-      const parseTaskModelOverride =
-        GROQ_MODEL_NAME.toLowerCase().includes('8b') ? 'llama-3.3-70b-versatile' : undefined;
       let rootParsed: unknown = null;
       try {
         const responseText = await generateText(prompt, {
           maxCompletionTokens: 1024,
-          ...(parseTaskModelOverride ? { modelOverride: parseTaskModelOverride } : {}),
-          disableModelFallbacks: true,
         });
         const jsonText = extractJson(responseText);
         const repairPrompt = buildParseTaskRepairPrompt({
@@ -3835,8 +4059,6 @@ Return ONLY a JSON array (no markdown): [{"title","description","estimatedMinute
         });
         const repairedText = await generateText(repairPrompt, {
           maxCompletionTokens: 1400,
-          ...(parseTaskModelOverride ? { modelOverride: parseTaskModelOverride } : {}),
-          disableModelFallbacks: true,
         });
         const repairedJsonText = extractJson(repairedText);
         rootParsed = safeJsonParseLoose<unknown>(repairedJsonText) ?? safeJsonParseLoose<unknown>(jsonText);
@@ -3875,61 +4097,18 @@ Return ONLY a JSON array (no markdown): [{"title","description","estimatedMinute
         if (result) items.push(result);
       }
       if (items.length === 0) {
-        const retryPrompt = `${prompt}
-
-IMPORTANT RETRY MODE:
-- Return exactly one JSON object.
-- Must include "kind" with one of: "event", "task", "study_plan".
-- Do not return arrays, markdown, explanations, or extra keys outside the schema.`;
-        let retryParsed: unknown = null;
-        try {
-          const retryText = await generateText(retryPrompt, {
-            maxCompletionTokens: 1024,
-            ...(parseTaskModelOverride ? { modelOverride: parseTaskModelOverride } : {}),
-            disableModelFallbacks: true,
-          });
-          retryParsed = safeJsonParseLoose<unknown>(extractJson(retryText));
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
-          if (isProviderRateLimitErrorMessage(msg)) {
-            const safeFallback = buildFallbackFromUserText(text, todayLocal, nowLocal);
-            return NextResponse.json({
-              ...safeFallback,
-              _meta: { modelRoot: rootParsed, fallback: true, reason: 'provider_rate_limited_retry' },
-            });
-          }
-          throw e;
+        let safeFallback = buildFallbackFromUserText(text, todayLocal, nowLocal);
+        if (String(safeFallback.kind) === 'task' && userTextIndicatesStudyPlan(text)) {
+          const upgraded = buildResponseFromLLMExtract(
+            { kind: 'study_plan', title: String(safeFallback.title || 'Study plan') },
+            'study_plan',
+            text,
+            todayLocal,
+            nowLocal
+          );
+          if (upgraded) safeFallback = upgraded;
         }
-        const retryItems: Record<string, unknown>[] = [];
-        const retryRawItems = Array.isArray(retryParsed) ? retryParsed : [retryParsed];
-        for (const rawItem of retryRawItems) {
-          if (!rawItem || typeof rawItem !== 'object') continue;
-          const result = normalizeLLMParseTaskItem(rawItem as Record<string, unknown>, text, todayLocal, nowLocal);
-          if (result) retryItems.push(result);
-        }
-        if (retryItems.length === 0) {
-          let safeFallback = buildFallbackFromUserText(text, todayLocal, nowLocal);
-          if (String(safeFallback.kind) === 'task' && userTextIndicatesStudyPlan(text)) {
-            const upgraded = buildResponseFromLLMExtract(
-              { kind: 'study_plan', title: String(safeFallback.title || 'Study plan') },
-              'study_plan',
-              text,
-              todayLocal,
-              nowLocal
-            );
-            if (upgraded) safeFallback = upgraded;
-          }
-          return NextResponse.json({ ...safeFallback, _meta: { modelRoot: retryParsed ?? rootParsed, fallback: true } });
-        }
-        if (retryItems.length === 1) {
-          return NextResponse.json({ ...retryItems[0], _meta: { modelRoot: retryParsed ?? rootParsed } });
-        }
-        return NextResponse.json({
-          success: true,
-          batch: true,
-          items: retryItems,
-          _meta: { modelRoot: retryParsed ?? rootParsed },
-        });
+        return NextResponse.json({ ...safeFallback, _meta: { modelRoot: rootParsed, fallback: true } });
       }
 
       if (items.length === 1) {

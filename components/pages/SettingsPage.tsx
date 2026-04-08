@@ -37,6 +37,7 @@ import { getSupabaseBrowser } from '@/lib/supabase/browser';
 import { STUDENT_GRADE_CUSTOM, STUDENT_GRADE_OPTION_VALUES } from '@/lib/grade-options';
 import { useFeedback } from '@/components/FeedbackProvider';
 import { isPosthogConfigured } from '@/lib/posthog-config';
+import { GeminiApiKeyStepsPanel } from '@/lib/ai-gemini-key-help';
 
 export default function SettingsPage() {
   const {
@@ -570,24 +571,42 @@ export default function SettingsPage() {
                 </button>
               </div>
 
-              <div className="bg-white rounded-xl p-6 border border-[#E8E6DC] shadow-sm">
-                <div className="flex items-center gap-3 mb-6">
+              <div
+                id="ai-assistant"
+                className="bg-white rounded-xl p-6 border border-[#E8E6DC] shadow-sm scroll-mt-24"
+              >
+                <div className="flex items-center gap-3 mb-4">
                   <div className="w-10 h-10 rounded-lg bg-[#788C5D]/12 flex items-center justify-center">
                     <KeyRound className="w-5 h-5 text-[#788C5D]" aria-hidden />
                   </div>
                   <div>
                     <h2 className="font-heading font-semibold text-xl text-[#141413]">AI assistant</h2>
-                    <p className="text-sm text-[#B0AEA5]">Optional: your own Groq key keeps quality high across devices</p>
+                    <p className="text-sm text-[#B0AEA5]">Use your own Gemini key for higher limits</p>
                   </div>
+                </div>
+
+                <div className="mb-6">
+                  <GeminiApiKeyStepsPanel />
                 </div>
 
                 {!user ? (
                   <p className="text-sm text-[#5C5B56] leading-relaxed">
-                    Sign in to save a personal Groq API key to your account (encrypted on our servers). Until then, the
+                    Sign in to save a personal API key to your account (encrypted on our servers). Until then, the
                     app uses the shared key when available, with a small daily limit per account.
                   </p>
                 ) : (
                   <div className="space-y-4">
+                    {aiQuotaUi?.configured ? (
+                      <div className="p-4 rounded-lg bg-[#E8F4E8]/30 border border-[#E8E6DC] text-sm text-[#141413]">
+                        <span className="font-heading font-medium">API status: </span>
+                        <span>Gemini key is detected on this server.</span>
+                      </div>
+                    ) : (
+                      <div className="p-4 rounded-lg bg-[#fff5f1] border border-[#E8E6DC] text-sm text-[#141413]">
+                        <span className="font-heading font-medium">API status: </span>
+                        <span>No server key detected. Add your Gemini API key in environment settings.</span>
+                      </div>
+                    )}
                     {aiQuotaUi?.sharedAi && !aiQuotaUi.sharedAi.byok && aiQuotaUi.sharedAi.limit > 0 ? (
                       <div className="p-4 rounded-lg bg-[#FAF9F5] border border-[#E8E6DC] text-sm text-[#141413]">
                         <span className="font-heading font-medium">Included AI today: </span>
@@ -595,29 +614,24 @@ export default function SettingsPage() {
                           {aiQuotaUi.sharedAi.used} / {aiQuotaUi.sharedAi.limit} uses (resets daily, UTC).
                         </span>
                         <p className="text-xs text-[#B0AEA5] mt-2 leading-relaxed">
-                          Add your key below to route scheduling through your own free Groq quota—same experience on every
+                          Add your key below to route scheduling through your own quota—same experience on every
                           device you sign in on.
                         </p>
                       </div>
                     ) : null}
                     {aiQuotaUi?.sharedAi?.byok ? (
                       <div className="p-4 rounded-lg bg-[#E8F4E8]/40 border border-[#E8E6DC] text-sm text-[#141413]">
-                        <span className="font-heading font-medium">Your Groq key is saved.</span>
-                        <span className="text-[#5C5B56]"> AI runs on your key (not the shared daily limit).</span>
+                        <span className="font-heading font-medium">Your API key is saved.</span>
+                        <span className="text-[#5C5B56]">
+                          {' '}
+                          AI uses your Gemini quota (not the shared 5/day limit). Sign in on another device with the same
+                          account — no need to paste the key again.
+                        </span>
                       </div>
                     ) : null}
 
                     <p className="text-xs text-[#B0AEA5] leading-relaxed">
-                      Create a free key at{' '}
-                      <a
-                        href="https://console.groq.com/keys"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-[#D97757] font-medium hover:underline"
-                      >
-                        console.groq.com/keys
-                      </a>
-                      . Paste it here once; we encrypt it and never show it back in the UI.
+                      Paste your key below once; we encrypt it and never show it back in the UI.
                     </p>
 
                     <input
@@ -628,7 +642,7 @@ export default function SettingsPage() {
                         setGroqKeyDraft(e.target.value);
                         setGroqKeyNotice(null);
                       }}
-                      placeholder="gsk_…"
+                      placeholder="AIza…"
                       className="w-full px-4 py-3 border border-[#E8E6DC] rounded-lg font-mono text-sm text-[#141413] focus:outline-none focus:ring-2 focus:ring-[#D97757]"
                     />
 
@@ -665,7 +679,10 @@ export default function SettingsPage() {
                                 return;
                               }
                               setGroqKeyDraft('');
-                              setGroqKeyNotice({ tone: 'ok', text: 'Saved. Your next AI request will use your key.' });
+                              setGroqKeyNotice({
+                                tone: 'ok',
+                                text: 'Saved. Your next AI request will use your key on this device and anywhere you sign in.',
+                              });
                               const r = await fetch('/api/gemini', { credentials: 'same-origin' });
                               const d = (await r.json()) as {
                                 configured?: boolean;
@@ -684,7 +701,7 @@ export default function SettingsPage() {
                         }}
                         className="flex-1 px-5 py-2.5 rounded-lg bg-[#141413] text-white font-heading font-semibold text-sm hover:bg-[#2a2a28] transition-colors disabled:opacity-45 disabled:cursor-not-allowed"
                       >
-                        {groqKeyBusy ? 'Saving…' : 'Save Groq key'}
+                        {groqKeyBusy ? 'Saving…' : 'Save API key'}
                       </button>
                       <button
                         type="button"
@@ -721,7 +738,7 @@ export default function SettingsPage() {
                         }}
                         className="flex-1 px-5 py-2.5 rounded-lg border border-[#E8E6DC] bg-white text-[#141413] font-heading font-semibold text-sm hover:bg-[#FAF9F5] transition-colors disabled:opacity-45"
                       >
-                        Remove saved key
+                        Remove API key
                       </button>
                     </div>
                   </div>

@@ -1,7 +1,11 @@
 import type { Metadata } from "next";
 import { Poppins, Lora } from "next/font/google";
 import "./globals.css";
+import { AuthProvider } from "@/components/AuthProvider";
+import PostHogProvider from "@/components/PostHogProvider";
+import { FeedbackProvider } from "@/components/FeedbackProvider";
 import SyncProvider from "@/components/SyncProvider";
+import AppChrome from "@/components/AppChrome";
 
 const poppins = Poppins({
   variable: "--font-poppins",
@@ -16,8 +20,9 @@ const lora = Lora({
 });
 
 export const metadata: Metadata = {
-  title: "Focusflow - AI-Powered Task Management",
-  description: "AI-based student scheduling system to automate schedules, alleviate cognitive load, and provide emotional upliftment",
+  title: "Flowly - AI-Powered Task Management",
+  description:
+    "AI-based student scheduling: break down tasks, plan your day, run focus sessions, and track progress without the clutter.",
 };
 
 export default function RootLayout({
@@ -25,16 +30,54 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const themeInitScript = `
+    (() => {
+      try {
+        const pathname = window.location.pathname || '/';
+        const isLanding = pathname === '/' || pathname.startsWith('/landing');
+        const saved = localStorage.getItem('focusflow-theme');
+        const media = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+        const apply = () => {
+          if (isLanding) {
+            document.documentElement.setAttribute('data-landing', 'true');
+            document.documentElement.setAttribute('data-theme', 'light');
+            return;
+          }
+          document.documentElement.removeAttribute('data-landing');
+          if (saved === 'light' || saved === 'dark') {
+            document.documentElement.setAttribute('data-theme', saved);
+            return;
+          }
+          document.documentElement.setAttribute('data-theme', 'light');
+        };
+        apply();
+        if (media && saved === 'system') {
+          if (media.addEventListener) media.addEventListener('change', apply);
+          else if (media.addListener) media.addListener(apply);
+        }
+      } catch {
+        document.documentElement.setAttribute('data-theme', 'light');
+      }
+    })();
+  `;
+
   return (
     <html lang="en">
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+      </head>
       <body
         className={`${poppins.variable} ${lora.variable} antialiased`}
       >
-        <SyncProvider>
-          <div className="min-h-screen">
-            {children}
-          </div>
-        </SyncProvider>
+        <AuthProvider>
+          <PostHogProvider>
+            <FeedbackProvider>
+              <SyncProvider>
+                <AppChrome>{children}</AppChrome>
+              </SyncProvider>
+            </FeedbackProvider>
+          </PostHogProvider>
+        </AuthProvider>
       </body>
     </html>
   );

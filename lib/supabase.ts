@@ -1,24 +1,10 @@
-import { createClient } from '@supabase/supabase-js';
+/**
+ * Supabase entrypoints — prefer named imports from `lib/supabase/*` in new code.
+ */
+export { isSupabaseConfigured, getBrowserSupabaseCredentials, requireSupabaseEnv } from './supabase/config';
+export { getSupabaseBrowser } from './supabase/browser';
+export { createSupabaseRouteHandlerClient } from './supabase/server';
+export { createSupabaseOAuthClient } from './supabase/oauth-client';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-
-if (!supabaseUrl || !supabaseAnonKey) {
-  console.warn('Supabase environment variables are not set. Please add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to .env.local');
-}
-
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    autoRefreshToken: true,
-    persistSession: true,
-    detectSessionInUrl: true,
-  },
-});
-
-// Server-side client (for API routes)
-export function createServerClient() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || '',
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
-  );
-}
+/** @deprecated Use `createSupabaseOAuthClient` — name kept for older imports. */
+export { createSupabaseOAuthClient as createServerClient } from './supabase/oauth-client';
