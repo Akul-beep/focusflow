@@ -9,8 +9,8 @@ export function utcTodayDateString(): string {
  */
 export function getAiSharedDailyLimit(): number {
   const raw = process.env.AI_SHARED_DAILY_LIMIT;
-  if (raw === undefined || raw === '') return 5;
+  if (raw === undefined || raw === '') return 0;
   const n = Number(raw);
-  if (!Number.isFinite(n)) return 5;
+  if (!Number.isFinite(n)) return 0;
   return Math.max(0, Math.min(500, Math.floor(n)));
 }

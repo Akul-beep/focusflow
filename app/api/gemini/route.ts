@@ -2668,8 +2668,8 @@ async function loadAiRouteAuthContext(): Promise<AiRouteAuthContext> {
   const userHasValidByok = Boolean(byokGroqKey);
   const canRunAi = userHasValidByok || getProviderOrder().length > 0;
   const limit = getAiSharedDailyLimit();
-  const shouldChargeSharedQuota =
-    Boolean(user) && !userHasValidByok && (!!isValidGroqApiKey || !!isValidGeminiApiKey) && limit > 0;
+  // Launch mode: shared-cap enforcement is temporarily disabled.
+  const shouldChargeSharedQuota = false;
 
   return {
     supabase,
@@ -2842,7 +2842,7 @@ function extractSubjectsFromUserText(text: string): string[] {
 function userTextIndicatesStudyPlan(text: string): boolean {
   const t = text.toLowerCase();
   // Strong cadence cues that imply multi-day sessions even without "prep/study" wording.
-  if (/\b(?:every\s+(?:second|2nd|other)\s+day|every\s+2\s+days?|alternate\s+days?|alternating\s+days?)\b/.test(t)) return true;
+  if (/\b(?:every\s+(?:second|2nd|other)\s+day|every\s+2\s+days?|alternat(?:e|ing|ive)\s+days?)\b/.test(t)) return true;
   if (/\b(?:one\s+day\s+.*\s+next\s+day|next\s+day\s+.*\s+one\s+day)\b/.test(t)) return true;
   if (/\b(?:alternating|alternate|rotating|rotate|switch(?:ing)?\s+between|cycling|each\s+day|every\s+day|chang(?:ing|e)\s+each\s+day)\b/.test(t)) return true;
   if (/\b(?:daily|weekday)\s+(?:prep|practice|revision|review|study)\b/.test(t)) return true;
