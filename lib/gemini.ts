@@ -30,6 +30,7 @@ export async function scheduleTasksWithAI(
   try {
     const response = await fetch('/api/gemini', {
       method: 'POST',
+      credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         action: 'scheduleTasks',
@@ -52,25 +53,44 @@ export async function scheduleTasksWithAI(
 export async function chunkTaskWithAI(
   title: string,
   description: string,
-  estimatedHours: number
+  estimatedHours: number,
+  options?: {
+    dueDate?: string;
+    priority?: 'low' | 'medium' | 'high';
+    studyPace?: 'light' | 'balanced' | 'intensive';
+    defaultSessionMinutes?: number;
+    gradeLevel?: string;
+  }
 ): Promise<MicroTask[]> {
   try {
     const response = await fetch('/api/gemini', {
       method: 'POST',
+      credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         action: 'chunkTask',
         title,
         description,
         estimatedHours,
+        dueDate: options?.dueDate,
+        priority: options?.priority,
+        studyPace: options?.studyPace,
+        defaultSessionMinutes: options?.defaultSessionMinutes,
+        gradeLevel: options?.gradeLevel,
       }),
     });
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       const errorMessage = errorData.message || errorData.error || 'Failed to chunk task';
-      const networkError = new Error(errorMessage);
-      (networkError as any).networkIssue = errorData.networkIssue;
+      const networkError = Object.assign(new Error(errorMessage), {
+        networkIssue: Boolean(
+          typeof errorData === 'object' &&
+            errorData !== null &&
+            'networkIssue' in errorData &&
+            (errorData as { networkIssue?: boolean }).networkIssue
+        ),
+      });
       throw networkError;
     }
 

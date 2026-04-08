@@ -66,120 +66,27 @@ NEXT_PUBLIC_SUPABASE_URL=https://your-project-ref.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key-here
 ```
 
-## Step 5: Set Up Database Tables (Optional - for future data sync)
+## Step 5: Set Up Database Tables (required for sync)
 
-When you're ready to sync user data to Supabase, you'll need to create these tables. For now, authentication will work without them.
+The app syncs tasks, calendar events, notes, exams, stats, and preferences to Postgres. Run these **in order** in the Supabase **SQL Editor**:
 
-### SQL to create tables (run in Supabase SQL Editor):
+1. **`supabase-migration.sql`** — base tables, RLS, and indexes.
+2. **`supabase-schema-extensions.sql`** — `notes`, `exams`, `micro_tasks.exam_id`, onboarding tables, weekend availability fields, dark mode/theme preference, no-scheduling-day persistence, extra `user_preferences` columns, **and** `user_ai_credentials` + `ai_usage_daily` + `consume_shared_ai_slot()` for optional per-user Groq keys and shared-AI daily limits.
 
-```sql
--- Users table (extends Supabase auth.users)
-CREATE TABLE IF NOT EXISTS public.user_profiles (
-  id UUID REFERENCES auth.users(id) PRIMARY KEY,
-  email TEXT,
-  full_name TEXT,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
+If you skip (2), uploads may fail with “column does not exist” or missing tables.
 
--- Tasks table
-CREATE TABLE IF NOT EXISTS public.tasks (
-  id TEXT PRIMARY KEY,
-  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
-  title TEXT NOT NULL,
-  description TEXT,
-  due_date TIMESTAMP WITH TIME ZONE,
-  priority TEXT CHECK (priority IN ('low', 'medium', 'high')),
-  subject TEXT,
-  completed BOOLEAN DEFAULT FALSE,
-  estimated_total_minutes INTEGER,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
+### Email + password sign-up
 
--- Micro tasks table
-CREATE TABLE IF NOT EXISTS public.micro_tasks (
-  id TEXT PRIMARY KEY,
-  task_id TEXT REFERENCES public.tasks(id) ON DELETE CASCADE,
-  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
-  title TEXT NOT NULL,
-  description TEXT,
-  estimated_minutes INTEGER,
-  order_index INTEGER,
-  completed BOOLEAN DEFAULT FALSE,
-  scheduled_date DATE,
-  scheduled_start TIMESTAMP WITH TIME ZONE,
-  scheduled_end TIMESTAMP WITH TIME ZONE,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
+1. In Supabase: **Authentication** → **Providers** → enable **Email**.
+2. Under **URL configuration**, add to **Redirect URLs**:
+   - `http://localhost:3000/auth/callback` (dev)
+   - `https://your-production-domain/auth/callback` (prod)
 
--- Pomodoro sessions table
-CREATE TABLE IF NOT EXISTS public.pomodoro_sessions (
-  id TEXT PRIMARY KEY,
-  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
-  task_id TEXT REFERENCES public.tasks(id) ON DELETE SET NULL,
-  micro_task_id TEXT REFERENCES public.micro_tasks(id) ON DELETE SET NULL,
-  duration INTEGER,
-  start_time TIMESTAMP WITH TIME ZONE,
-  end_time TIMESTAMP WITH TIME ZONE,
-  completed BOOLEAN DEFAULT FALSE,
-  type TEXT CHECK (type IN ('focus', 'break')),
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
+Google OAuth still uses the same `/auth/callback` route.
 
--- User stats table
-CREATE TABLE IF NOT EXISTS public.user_stats (
-  user_id UUID REFERENCES auth.users(id) PRIMARY KEY,
-  tasks_completed INTEGER DEFAULT 0,
-  micro_tasks_completed INTEGER DEFAULT 0,
-  total_focus_minutes INTEGER DEFAULT 0,
-  weekly_goal INTEGER DEFAULT 20,
-  weekly_completed DECIMAL DEFAULT 0,
-  current_streak INTEGER DEFAULT 0,
-  longest_streak INTEGER DEFAULT 0,
-  focus_coins INTEGER DEFAULT 0,
-  level INTEGER DEFAULT 1,
-  focus_coins_today INTEGER DEFAULT 0,
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
+### Sign-in gate (production)
 
--- Enable Row Level Security (RLS)
-ALTER TABLE public.user_profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.tasks ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.micro_tasks ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.pomodoro_sessions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.user_stats ENABLE ROW LEVEL SECURITY;
-
--- Create policies (users can only access their own data)
-CREATE POLICY "Users can view own profile" ON public.user_profiles
-  FOR SELECT USING (auth.uid() = id);
-
-CREATE POLICY "Users can update own profile" ON public.user_profiles
-  FOR UPDATE USING (auth.uid() = id);
-
-CREATE POLICY "Users can view own tasks" ON public.tasks
-  FOR SELECT USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can insert own tasks" ON public.tasks
-  FOR INSERT WITH CHECK (auth.uid() = user_id);
-
-CREATE POLICY "Users can update own tasks" ON public.tasks
-  FOR UPDATE USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can delete own tasks" ON public.tasks
-  FOR DELETE USING (auth.uid() = user_id);
-
--- Similar policies for other tables...
-CREATE POLICY "Users can manage own micro tasks" ON public.micro_tasks
-  FOR ALL USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can manage own pomodoro sessions" ON public.pomodoro_sessions
-  FOR ALL USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can manage own stats" ON public.user_stats
-  FOR ALL USING (auth.uid() = user_id);
-```
+When `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` are set, **middleware** sends unauthenticated visitors to **`/login`**. Without those env vars, the app stays **local-only** (no login wall) for offline development.
 
 ## Step 6: Test the Setup
 
@@ -188,15 +95,11 @@ CREATE POLICY "Users can manage own stats" ON public.user_stats
    npm run dev
    ```
 
-2. Navigate to the Settings page: `http://localhost:3000/settings`
+2. Open `http://localhost:3000` — you should be redirected to **`/login`** when Supabase env is set.
 
-3. Click "Sign in with Google"
+3. Use **Sign up** or **Google** on `/login` or `/signup`.
 
-4. You should be redirected to Google's sign-in page
-
-5. After signing in, you'll be redirected back to the settings page
-
-6. You should see your email address displayed, confirming you're signed in
+4. After OAuth, you land on `/` or the `next` path; open **Settings** to confirm your email and use **Sync** / **Re-run scheduling** as needed.
 
 ## Troubleshooting
 
