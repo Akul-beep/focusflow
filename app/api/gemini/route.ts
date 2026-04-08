@@ -2852,6 +2852,23 @@ function userTextIndicatesStudyPlan(text: string): boolean {
   return false;
 }
 
+function hasExplicitWeeklyNamedCadence(text: string): boolean {
+  const t = normalizeSchedulingUserText(text).toLowerCase();
+  if (
+    /\b(?:every|each)\s+(?:second|2nd|other|third|3rd|fourth|4th)?\s*(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)s?\b/.test(
+      t
+    )
+  )
+    return true;
+  if (
+    /\b(?:second|2nd|third|3rd|fourth|4th)\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)\b/.test(
+      t
+    )
+  )
+    return true;
+  return false;
+}
+
 /**
  * Deterministically generate micro-tasks for a study plan.
  * The LLM told us *what* to study and *how* (cadence, subjects, duration).
@@ -3052,8 +3069,12 @@ function buildResponseFromLLMExtract(
 
     // ── Reclassification rules ──
 
+    // 0) Weekly named-day recurring work (including "prep") should stay event-like calendar recurrence.
+    if (kind === 'task' && wantsRepeat && hasExplicitWeeklyNamedCadence(userText) && !sessionCount && !hasMultipleSubjects) {
+      kind = 'event';
+    }
     // 1) Task with 2+ subjects cycling → MUST be study_plan
-    if (kind === 'task' && hasMultipleSubjects) {
+    else if (kind === 'task' && hasMultipleSubjects) {
       kind = 'study_plan';
       if (!hasLLMSubjects) p.subjects = textSubjects;
       if (!hasCadence) p.cadence = 'rotate_daily';
@@ -3392,7 +3413,11 @@ function normalizeLLMParseTaskItem(
   })();
   const kind = String(raw.kind || inferredKind).trim();
   if (kind !== 'event' && kind !== 'task' && kind !== 'study_plan') return null;
-  if (kind === 'task' && userTextIndicatesStudyPlan(userText)) {
+  if (
+    kind === 'task' &&
+    userTextIndicatesStudyPlan(userText) &&
+    !(userAskedForWeeklyRecurrence(userText) && hasExplicitWeeklyNamedCadence(userText))
+  ) {
     const upgraded = buildResponseFromLLMExtract({ ...raw }, 'study_plan', userText, todayLocal, nowLocal);
     if (upgraded) return upgraded;
   }
@@ -3448,9 +3473,10 @@ function normalizeLLMParseTaskItem(
         : [];
       const days = extractEventRepeatDaysFromUserText(userText, modelDays);
       if (days.length > 0) {
+        const textInterval = extractRepeatIntervalFromUserText(userText) ?? 1;
         repeat = {
           frequency: 'weekly',
-          interval: Math.max(1, Math.round(Number(repeatRaw.interval)) || (extractRepeatIntervalFromUserText(userText) ?? 1)),
+          interval: Math.max(1, Math.max(Math.round(Number(repeatRaw.interval)) || 1, textInterval)),
           daysOfWeek: days,
         };
       }
