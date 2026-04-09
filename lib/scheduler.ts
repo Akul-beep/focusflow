@@ -380,6 +380,27 @@ function normalizeDay(d: Date): Date {
   return x;
 }
 
+/**
+ * Drop blocked (no-study) days from the packer’s candidate list.
+ * If every day in the original window is blocked, scan forward so “mark day off” can move work
+ * to later dates instead of silently keeping blocked days (previous bug).
+ */
+function applyBlockedDayFilter(days: Date[], blocked: Set<string> | undefined): Date[] {
+  if (!blocked?.size) return days;
+  const dayKey = (d: Date) => format(normalizeDay(d), 'yyyy-MM-dd');
+  const filtered = days.filter((d) => !blocked.has(dayKey(d)));
+  if (filtered.length > 0) return filtered;
+  const start = normalizeDay(days[0]!);
+  const targetCount = Math.max(1, days.length);
+  const out: Date[] = [];
+  let d = new Date(start);
+  for (let guard = 0; guard < 120 && out.length < targetCount; guard++) {
+    if (!blocked.has(dayKey(d))) out.push(new Date(d));
+    d = addDays(d, 1);
+  }
+  return out.length > 0 ? out : days;
+}
+
 /** Micro-task schedule fields may be ISO strings after persist / sync merge / JSON. */
 function coerceToDate(value: unknown): Date | undefined {
   if (value == null) return undefined;
@@ -614,10 +635,7 @@ export function scheduleMicroTasksIntoTimes(args: {
   const dayKey = (d: Date) => format(normalizeDay(d), 'yyyy-MM-dd');
   const dayIndexByKey = new Map<string, number>();
   const blocked = options?.blockedDateKeys;
-  if (blocked?.size) {
-    const filtered = validDayDates.filter((d) => !blocked.has(dayKey(d)));
-    if (filtered.length > 0) validDayDates = filtered;
-  }
+  validDayDates = applyBlockedDayFilter(validDayDates, blocked);
   for (let i = 0; i < validDayDates.length; i++) {
     dayIndexByKey.set(dayKey(validDayDates[i]!), i);
   }
@@ -930,11 +948,7 @@ export function scheduleMicroTasksIntoTimesAdaptive(args: {
     dayList.push(new Date(d));
   }
   if (dayList.length === 0) dayList.push(new Date(start0));
-  if (options?.blockedDateKeys?.size) {
-    const dk = (d: Date) => format(startOfDay(d), 'yyyy-MM-dd');
-    const filtered = dayList.filter((d) => !options.blockedDateKeys!.has(dk(d)));
-    if (filtered.length > 0) dayList = filtered;
-  }
+  dayList = applyBlockedDayFilter(dayList, options?.blockedDateKeys);
 
   const tierSet = new Set<string>();
   const tiers: Array<{ ws: number; we: number }> = [];

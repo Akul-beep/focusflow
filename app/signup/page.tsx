@@ -214,17 +214,20 @@ function SignupInner() {
     setNotice(null);
     setLoading(true);
     try {
-      const res = await fetch('/api/auth/signin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ next }),
+      const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`;
+      const { data, error: oauthErr } = await getSupabaseBrowser().auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo, skipBrowserRedirect: true },
       });
-      const data = await res.json();
-      if (data.url) {
-        window.location.href = data.url as string;
+      if (oauthErr) {
+        setError(oauthErr.message);
         return;
       }
-      setError((data.error as string) || 'Could not start Google sign-in.');
+      if (data.url) {
+        window.location.assign(data.url);
+        return;
+      }
+      setError('Could not start Google sign-in.');
     } catch {
       setError('Could not start Google sign-in.');
     } finally {
