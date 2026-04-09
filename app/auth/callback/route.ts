@@ -3,6 +3,17 @@ import { createServerClient } from '@supabase/ssr';
 import { DEFAULT_SIGNED_IN_PATH } from '@/lib/default-signed-in-path';
 import { isSupabaseConfigured, requireSupabaseEnv } from '@/lib/supabase/config';
 
+const CALLBACK_ENRICH_TIMEOUT_MS = 1500;
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      setTimeout(() => reject(new Error(`Timed out after ${timeoutMs}ms`)), timeoutMs);
+    }),
+  ]);
+}
+
 /**
  * OAuth (e.g. Google) redirects here with `?code=`. We exchange the code for a session
  * and must attach auth cookies to the **same** redirect response (Next.js route handlers).
@@ -62,7 +73,10 @@ export async function GET(request: NextRequest) {
   // If signup happened via email-confirm flow, hydrate initial preferences from auth metadata
   // so Settings immediately reflects onboarding answers across browsers.
   try {
-    const { data } = await supabase.auth.getUser();
+    const { data } = await withTimeout(
+      supabase.auth.getUser(),
+      CALLBACK_ENRICH_TIMEOUT_MS
+    );
     const user = data.user;
     if (user) {
       const md = (user.user_metadata || {}) as Record<string, unknown>;
@@ -77,22 +91,27 @@ export async function GET(request: NextRequest) {
 
       if (weekdayStart || weekdayEnd || weekendStart || weekendEnd || studyPace || personalGoal || themePref) {
         const nowIso = new Date().toISOString();
-        await supabase.from('user_preferences').upsert(
-          {
-            user_id: user.id,
-            ...(weekdayStart ? { schedule_work_start: weekdayStart } : {}),
-            ...(weekdayEnd ? { schedule_work_end: weekdayEnd } : {}),
-            ...(weekendStart ? { schedule_weekend_start: weekendStart } : {}),
-            ...(weekendEnd ? { schedule_weekend_end: weekendEnd } : {}),
-            ...(studyPace ? { schedule_study_pace: studyPace } : {}),
-            ...(personalGoal ? { motivation_personal_goal: personalGoal } : {}),
-            ...(typeof dailyBriefing === 'boolean' ? { motivation_daily_briefing: dailyBriefing } : {}),
-            ...(themePref ? { theme_preference: themePref } : {}),
-            onboarding_completed_at: nowIso,
-            updated_at: nowIso,
-            synced_at: nowIso,
-          },
-          { onConflict: 'user_id' }
+        await withTimeout(
+          (async () => {
+            await supabase.from('user_preferences').upsert(
+              {
+                user_id: user.id,
+                ...(weekdayStart ? { schedule_work_start: weekdayStart } : {}),
+                ...(weekdayEnd ? { schedule_work_end: weekdayEnd } : {}),
+                ...(weekendStart ? { schedule_weekend_start: weekendStart } : {}),
+                ...(weekendEnd ? { schedule_weekend_end: weekendEnd } : {}),
+                ...(studyPace ? { schedule_study_pace: studyPace } : {}),
+                ...(personalGoal ? { motivation_personal_goal: personalGoal } : {}),
+                ...(typeof dailyBriefing === 'boolean' ? { motivation_daily_briefing: dailyBriefing } : {}),
+                ...(themePref ? { theme_preference: themePref } : {}),
+                onboarding_completed_at: nowIso,
+                updated_at: nowIso,
+                synced_at: nowIso,
+              },
+              { onConflict: 'user_id' }
+            );
+          })(),
+          CALLBACK_ENRICH_TIMEOUT_MS
         );
       }
     }
