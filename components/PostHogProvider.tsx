@@ -4,7 +4,7 @@ import { Suspense, useEffect, useRef } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
 import posthog from 'posthog-js';
 import { PostHogProvider as PHProvider } from 'posthog-js/react';
-import { isPosthogConfigured, posthogApiHost } from '@/lib/posthog-config';
+import { isPosthogConfigured, posthogApiHost, posthogKey } from '@/lib/posthog-config';
 import { useAuth } from '@/components/AuthProvider';
 
 function PostHogPageView() {
@@ -49,9 +49,9 @@ export default function PostHogProvider({ children }: { children: React.ReactNod
   useEffect(() => {
     if (!isPosthogConfigured() || didInit.current) return;
     didInit.current = true;
-    posthog.init(process.env.NEXT_PUBLIC_POSTHOG_KEY!, {
+    posthog.init(posthogKey(), {
       api_host: posthogApiHost(),
-      capture_pageview: false,
+      capture_pageview: true,
       capture_pageleave: true,
       persistence: 'localStorage+cookie',
     });
