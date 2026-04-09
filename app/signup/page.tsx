@@ -214,20 +214,18 @@ function SignupInner() {
     setNotice(null);
     setLoading(true);
     try {
-      const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`;
-      const { data, error: oauthErr } = await getSupabaseBrowser().auth.signInWithOAuth({
-        provider: 'google',
-        options: { redirectTo, skipBrowserRedirect: true },
+      const res = await fetch('/api/auth/signin', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ next }),
       });
-      if (oauthErr) {
-        setError(oauthErr.message);
-        return;
-      }
+      const data = (await res.json()) as { url?: string; error?: string };
       if (data.url) {
         window.location.assign(data.url);
         return;
       }
-      setError('Could not start Google sign-in.');
+      setError((data.error as string) || 'Could not start Google sign-in.');
     } catch {
       setError('Could not start Google sign-in.');
     } finally {

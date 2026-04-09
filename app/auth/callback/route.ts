@@ -1,18 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { after } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
+import { createClient } from '@supabase/supabase-js';
 import { DEFAULT_SIGNED_IN_PATH } from '@/lib/default-signed-in-path';
 import { isSupabaseConfigured, requireSupabaseEnv } from '@/lib/supabase/config';
-
-const CALLBACK_ENRICH_TIMEOUT_MS = 1500;
-
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) => {
-      setTimeout(() => reject(new Error(`Timed out after ${timeoutMs}ms`)), timeoutMs);
-    }),
-  ]);
-}
 
 /**
  * OAuth (e.g. Google) redirects here with `?code=`. We exchange the code for a session
@@ -63,60 +54,59 @@ export async function GET(request: NextRequest) {
     },
   });
 
-  const { error } = await supabase.auth.exchangeCodeForSession(code);
+  const { data: exchanged, error } = await supabase.auth.exchangeCodeForSession(code);
 
   if (error) {
     console.error('Auth callback error:', error);
     return NextResponse.redirect(new URL('/login?error=auth_failed', request.url));
   }
 
-  // If signup happened via email-confirm flow, hydrate initial preferences from auth metadata
-  // so Settings immediately reflects onboarding answers across browsers.
-  try {
-    const { data } = await withTimeout(
-      supabase.auth.getUser(),
-      CALLBACK_ENRICH_TIMEOUT_MS
-    );
-    const user = data.user;
-    if (user) {
-      const md = (user.user_metadata || {}) as Record<string, unknown>;
-      const weekdayStart = String(md.onboarding_weekday_start || '').trim();
-      const weekdayEnd = String(md.onboarding_weekday_end || '').trim();
-      const weekendStart = String(md.onboarding_weekend_start || '').trim();
-      const weekendEnd = String(md.onboarding_weekend_end || '').trim();
-      const studyPace = String(md.onboarding_study_pace || '').trim();
-      const personalGoal = String(md.onboarding_personal_goal || '').trim();
-      const dailyBriefing = md.onboarding_daily_briefing;
-      const themePref = String(md.theme_preference || '').trim();
+  const session = exchanged?.session;
+  const user = session?.user;
+  const accessToken = session?.access_token;
 
-      if (weekdayStart || weekdayEnd || weekendStart || weekendEnd || studyPace || personalGoal || themePref) {
-        const nowIso = new Date().toISOString();
-        await withTimeout(
-          (async () => {
-            await supabase.from('user_preferences').upsert(
-              {
-                user_id: user.id,
-                ...(weekdayStart ? { schedule_work_start: weekdayStart } : {}),
-                ...(weekdayEnd ? { schedule_work_end: weekdayEnd } : {}),
-                ...(weekendStart ? { schedule_weekend_start: weekendStart } : {}),
-                ...(weekendEnd ? { schedule_weekend_end: weekendEnd } : {}),
-                ...(studyPace ? { schedule_study_pace: studyPace } : {}),
-                ...(personalGoal ? { motivation_personal_goal: personalGoal } : {}),
-                ...(typeof dailyBriefing === 'boolean' ? { motivation_daily_briefing: dailyBriefing } : {}),
-                ...(themePref ? { theme_preference: themePref } : {}),
-                onboarding_completed_at: nowIso,
-                updated_at: nowIso,
-                synced_at: nowIso,
-              },
-              { onConflict: 'user_id' }
-            );
-          })(),
-          CALLBACK_ENRICH_TIMEOUT_MS
-        );
-      }
+  if (user && accessToken) {
+    const md = (user.user_metadata || {}) as Record<string, unknown>;
+    const weekdayStart = String(md.onboarding_weekday_start || '').trim();
+    const weekdayEnd = String(md.onboarding_weekday_end || '').trim();
+    const weekendStart = String(md.onboarding_weekend_start || '').trim();
+    const weekendEnd = String(md.onboarding_weekend_end || '').trim();
+    const studyPace = String(md.onboarding_study_pace || '').trim();
+    const personalGoal = String(md.onboarding_personal_goal || '').trim();
+    const dailyBriefing = md.onboarding_daily_briefing;
+    const themePref = String(md.theme_preference || '').trim();
+
+    if (weekdayStart || weekdayEnd || weekendStart || weekendEnd || studyPace || personalGoal || themePref) {
+      const userId = user.id;
+      const nowIso = new Date().toISOString();
+      after(async () => {
+        try {
+          const sb = createClient(supabaseUrl, supabaseAnonKey, {
+            auth: { persistSession: false, autoRefreshToken: false },
+            global: { headers: { Authorization: `Bearer ${accessToken}` } },
+          });
+          await sb.from('user_preferences').upsert(
+            {
+              user_id: userId,
+              ...(weekdayStart ? { schedule_work_start: weekdayStart } : {}),
+              ...(weekdayEnd ? { schedule_work_end: weekdayEnd } : {}),
+              ...(weekendStart ? { schedule_weekend_start: weekendStart } : {}),
+              ...(weekendEnd ? { schedule_weekend_end: weekendEnd } : {}),
+              ...(studyPace ? { schedule_study_pace: studyPace } : {}),
+              ...(personalGoal ? { motivation_personal_goal: personalGoal } : {}),
+              ...(typeof dailyBriefing === 'boolean' ? { motivation_daily_briefing: dailyBriefing } : {}),
+              ...(themePref ? { theme_preference: themePref } : {}),
+              onboarding_completed_at: nowIso,
+              updated_at: nowIso,
+              synced_at: nowIso,
+            },
+            { onConflict: 'user_id' }
+          );
+        } catch (e) {
+          console.warn('Auth callback onboarding preference sync skipped:', e);
+        }
+      });
     }
-  } catch (e) {
-    console.warn('Auth callback onboarding preference sync skipped:', e);
   }
 
   return response;
