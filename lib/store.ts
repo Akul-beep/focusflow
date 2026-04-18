@@ -1674,12 +1674,35 @@ export const useStore = create<AppState>()(
             );
           };
 
+          /** When the same exam exists locally and remotely, union topics/covered/review so a stale download does not drop local checkmarks. */
           const mergeExams = (local: Exam[], remote: Exam[]): Exam[] => {
             if (remote.length === 0) return local.map(withNormalizedExamArrays);
             const byId = new Map<string, Exam>();
             remote.forEach((e) => byId.set(e.id, withNormalizedExamArrays(e)));
             local.forEach((e) => {
-              if (!byId.has(e.id)) byId.set(e.id, withNormalizedExamArrays(e));
+              const loc = withNormalizedExamArrays(e);
+              const rem = byId.get(loc.id);
+              if (!rem) {
+                byId.set(loc.id, loc);
+                return;
+              }
+              const seen = new Set(rem.topics);
+              const mergedTopics = [...rem.topics, ...loc.topics.filter((t) => !seen.has(t))];
+              const topics =
+                mergedTopics.length > 0 ? mergedTopics : loc.topics.length > 0 ? loc.topics : rem.topics;
+              const coveredSet = new Set([...rem.coveredTopicIds, ...loc.coveredTopicIds]);
+              const reviewSet = new Set([...rem.reviewTopicIds, ...loc.reviewTopicIds]);
+              byId.set(
+                loc.id,
+                withNormalizedExamArrays({
+                  ...rem,
+                  ...loc,
+                  topics,
+                  coveredTopicIds: [...coveredSet],
+                  reviewTopicIds: [...reviewSet],
+                  sessionsGenerated: rem.sessionsGenerated || loc.sessionsGenerated,
+                })
+              );
             });
             return Array.from(byId.values()).map(withNormalizedExamArrays);
           };
