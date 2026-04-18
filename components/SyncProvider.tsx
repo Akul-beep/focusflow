@@ -131,8 +131,17 @@ export default function SyncProvider({ children }: { children: React.ReactNode }
     };
 
     document.addEventListener('visibilitychange', onVisibility);
+    // `visibilitychange` does not always run before a full tab close; these fire closer to unload
+    // so debounced exam syllabus edits still reach Supabase when the user closes the tab quickly.
+    const flushOnLeave = () => {
+      void flushSyncPushToCloud().catch(() => {});
+    };
+    window.addEventListener('pagehide', flushOnLeave);
+    window.addEventListener('beforeunload', flushOnLeave);
     return () => {
       document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pagehide', flushOnLeave);
+      window.removeEventListener('beforeunload', flushOnLeave);
       if (visibleTimer) clearTimeout(visibleTimer);
     };
   }, [storageReady]);

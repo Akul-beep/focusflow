@@ -58,6 +58,12 @@ export default function ExamsListPage() {
           ) : (
             <ul className="grid grid-cols-1 gap-3 sm:gap-4">
               {exams.map((exam) => {
+                const topicList = exam.topics ?? [];
+                const syllabusTotal = topicList.length;
+                const syllabusDone =
+                  syllabusTotal > 0
+                    ? (exam.coveredTopicIds ?? []).filter((id) => topicList.includes(id)).length
+                    : 0;
                 const daysLeft = differenceInCalendarDays(new Date(exam.examDate), today);
                 const badge =
                   daysLeft < 0
@@ -95,6 +101,11 @@ export default function ExamsListPage() {
                           <p className="text-sm text-[#B0AEA5] mt-1 flex items-center gap-1.5">
                             <span className="tabular-nums">{format(new Date(exam.examDate), 'EEEE, MMM d, yyyy')}</span>
                           </p>
+                          {syllabusTotal > 0 ? (
+                            <p className="text-xs text-[#6A9BCC] font-heading font-medium mt-1.5 tabular-nums">
+                              Syllabus · {syllabusDone}/{syllabusTotal} topics done
+                            </p>
+                          ) : null}
                         </div>
                         <ChevronRight
                           className="w-5 h-5 text-[#B0AEA5] shrink-0 group-hover:text-[#D97757] transition-colors"
